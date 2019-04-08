@@ -66,7 +66,7 @@ def main(RV_ts, Prec_reg, ex):
                                               ex)    
         
 #        elif (ex['leave_n_out'] == True) & (ex['ROC_leave_n_out'] == False):
-        elif (ex['method'] == 'iter') or ex['method'][:5] == 'split':
+        elif (ex['method'] == 'iter') or ex['method'][:5] == 'split' or ex['method'] == 'no_train_test_split':
             # train each time on only train years
             ds_Sem = extract_precursor(Prec_reg, train, test, ex)    
             
@@ -116,10 +116,9 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
     elif ex['method']=='no_train_test_split':
         print('Training on all years')
         Prec_train_idx = np.arange(0, Prec_reg.time.size) #range(len(full_years)) if full_years[i] in rand_train_years]
-        train = dict( { 'Prec'  : Prec_reg,
-                        'Prec_train_idx' : Prec_train_idx,
-                        'RV'    : RV_ts,
-                        'events': Ev_timeseries(RV_ts, ex['event_thres'], ex)[0]})
+        train = dict( { 'Prec_train_idx' : Prec_train_idx,
+                        'RV'    : RV_ts})
+                        
         test = train.copy()
 
     
@@ -218,7 +217,6 @@ def extract_precursor(Prec_reg, train, test, ex):
                                              ts_3d, std_train_lag, ex)  
 #        composite_p1.plot() 
 #        xrnpmap_p1.plot()
-     
 
         pattern_CPPA[idx] = composite_p1.where(composite_p1.mask == True)
         
@@ -446,8 +444,6 @@ def store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
 def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
     #%%
     
-    
-
     
     for lag in ex['lags']:
         idx = ex['lags'].index(lag)
@@ -1505,9 +1501,9 @@ def kornshell_with_input(args, ex):
 #    args = [anom]
     import os
     import subprocess
-    cwd = os.getcwd()
+#    cwd = os.getcwd()
     # Writing the bash script:
-    new_bash_script = os.path.join(cwd, "bash_script.sh")
+    new_bash_script = os.path.join('/Users/semvijverberg/surfdrive/Scripts/CPPA/CPPA/', "bash_script.sh")
 #    arg_5d_mean = 'cdo timselmean,5 {} {}'.format(infile, outfile)
     #arg1 = 'ncea -d latitude,59.0,84.0 -d longitude,-95,-10 {} {}'.format(infile, outfile)
     
@@ -1658,6 +1654,36 @@ def extend_longitude(data):
     plottable = plottable.to_array(dim='ds')
     return plottable
 
+
+def plot_earth(view="EARTH", kwrgs={'cen_lon':0}):
+    #%%
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+    # Create Big Figure
+    plt.rcParams['figure.figsize'] = [18, 12]
+
+    # create Projection and Map Elements
+    projection = ccrs.PlateCarree(
+            central_longitude=kwrgs['cen_lon'])
+    ax = plt.axes(projection=projection)
+    ax.add_feature(cfeature.COASTLINE)
+    ax.add_feature(cfeature.BORDERS)
+    ax.add_feature(cfeature.STATES)
+    ax.add_feature(cfeature.OCEAN, color="white")
+    ax.add_feature(cfeature.LAND, color="lightgray")
+
+    if view == "US":
+        ax.set_xlim(-130, -65)
+        ax.set_ylim(25, 50)
+    elif view == "EAST US":
+        ax.set_xlim(-105, -65)
+        ax.set_ylim(25, 50)
+    elif view == "EARTH":
+        ax.set_xlim(-180, 180)
+        ax.set_ylim(-90, 90)
+    #%%
+    return projection, ax
+
 def xarray_plot(data, path='default', name = 'default', saving=False):
     # from plotting import save_figure
     import matplotlib.pyplot as plt
@@ -1786,11 +1812,11 @@ def plot_events_validation(pred1, pred2, obs, pt1, pt2, othreshold, test_year=No
 
 def plot_oneyr_events(xarray, ex, test_year, folder, saving=False):
     #%%
-    if ex['event_thres'] == 'std':
+    if ex['event_percentile'] == 'std':
         # binary time serie when T95 exceeds 1 std
         threshold = xarray.mean(dim='time').values + xarray.std().values
     else:
-        percentile = ex['event_thres']
+        percentile = ex['event_percentile']
         threshold = np.percentile(xarray.values, percentile)
     
     testyear = xarray.where(xarray.time.dt.year == test_year).dropna(dim='time', how='any')

@@ -400,8 +400,7 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         #%%
         idx = ex['lags'].index(lag)
         # normalize
-        ts_pred_mcK  = ((ex['test_ts_mcK'][idx]-np.mean(ex['test_ts_mcK'][idx]))/ \
-                                  (np.std(ex['test_ts_mcK'][idx]) ) )
+     
         ts_pred_Sem  = ((ex['test_ts_Sem'][idx]-np.mean(ex['test_ts_Sem'][idx]))/ \
                                   (np.std(ex['test_ts_Sem'][idx]) ) )
         norm_test_RV = ((ex['test_RV'][idx]-np.mean(ex['test_RV'][idx]))/ \
@@ -417,7 +416,7 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         years = labels.year
         years.values[-1] = ex['endyear']+1
 #                    years = np.concatenate((labels, [labels[-1]+1]))
-        df = pd.DataFrame(data={'RV':norm_test_RV, 'CPPA':ts_pred_Sem, 'PEP':ts_pred_mcK, 
+        df = pd.DataFrame(data={'RV':norm_test_RV, 'CPPA':ts_pred_Sem, 
                                 'date':labels, 'year':years} )
         df['RVrm'] = df['RV'].rolling(20, center=True, min_periods=5, 
               win_type=None).mean()
@@ -451,10 +450,8 @@ def plotting_timeseries(test, yrs_to_plot, ex):
 #                        ax.set_xticks(df_sub['date'][::20])
 #                        ax.set_xlim(df_sub['date'].iloc[0],df_sub['date'].iloc[-1])
             # should normalize with std from training spatial covariance or logit ts
-            ax.plot(df_sub['date'],df_sub['PEP'], linewidth=0.5, 
-                    label='mcK', color='green', alpha=0.6)
             ax.plot(df_sub['date'],df_sub['CPPA'], linewidth=2,
-                    label='Sem', color='blue', alpha=0.9)
+                    label='CPPA', color='blue', alpha=0.9)
             ax.plot(df_sub['date'], df_sub['RV'], alpha=0.4, 
                     label='Truth', color='red', linewidth=0.5) 
             ax.plot(df_sub['date'], df_sub['RVrm'], alpha=0.9, 
@@ -463,14 +460,15 @@ def plotting_timeseries(test, yrs_to_plot, ex):
             
             ax.fill_between(df_sub['date'].values, threshold, df_sub['RV'].values, 
                              where=(df_sub['RV'].values > threshold),
-                             interpolate=True, color="orange", alpha=0.7, label="hot days")
+                             interpolate=True, color="orange", alpha=0.7, label="Events")
             if n_ax+1 == n_plots:
                 ax.axis('off')
                 ax.legend(loc='lower center', prop={'size': 15})
         g.fig.text(0.5, 1.02, title, fontsize=15,
                fontweight='heavy', horizontalalignment='center')
         filename = '{} day lead time series prediction'.format(lag)
-        file_name = os.path.join(ex['exp_folder'],filename+'.png')
+        path = os.path.join(ex['figpathbase'], ex['CPPA_folder'])
+        file_name = os.path.join(path,filename+'.png')
         g.fig.savefig(file_name ,dpi=250, frameon=True)
         plt.show()
         #%%

@@ -23,6 +23,8 @@ def spatial_cov(ex, key1='spatcov_CPPA'):
     ex['test_RV'] = np.zeros( len(ex['lags']) , dtype=list)
     ex['test_yrs'] = np.zeros( len(ex['lags']) , dtype=list)
     
+    if 'use_ts_logit' not in ex.keys():
+        ex['use_ts_logit'] = False ; ex['logit_valid'] = False
     if ex['use_ts_logit'] == False:
         ex['test_ts_Sem'] = np.zeros( len(ex['lags']) , dtype=list)
     

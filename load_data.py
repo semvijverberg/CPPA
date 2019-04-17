@@ -27,8 +27,8 @@ def load_data(ex):
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
     dicRV = np.load(filename,  encoding='latin1').item()
     RVtsfull = dicRV['RVfullts95']
-    ex['mask'] = dicRV['RV_array']['mask']
-    func_CPPA.xarray_plot(dicRV['RV_array']['mask'])
+    ex['mask'] = dicRV['mask']
+    func_CPPA.xarray_plot(dicRV['mask'])
     RVhour   = RVtsfull.time[0].dt.hour.values
     datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
                                     ex['startyear'], ex['endyear'])
@@ -55,12 +55,10 @@ def load_data(ex):
     
     # Load in external ncdf
     
-    filename = '{}_1979-2017_1jan_31dec_daily_2.5deg.nc'.format(ex['name'],
-                ex['grid_res'])
     #filename_precur = 'sm2_1979-2017_2jan_31okt_dt-1days_{}deg.nc'.format(ex['grid_res'])
     #path = os.path.join(ex['path_raw'], 'tmpfiles')
     # full globe - full time series
-    varfullgl = func_CPPA.import_array(filename_precur, ex)
+    varfullgl = func_CPPA.import_array(ex['filename_precur'], ex)
 
     Prec_reg = func_CPPA.find_region(varfullgl, region=ex['region'])[0]
     

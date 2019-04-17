@@ -142,7 +142,7 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
     print(exp_key)
     ex = ROC_score_wrapper(ex)
         
-    score_Sem       = np.round(ex['score'][-1][1], 2)
+    score_Sem       = np.round(ex['score'][0][0], 2)
 
     # =============================================================================
     # Store data in output summary

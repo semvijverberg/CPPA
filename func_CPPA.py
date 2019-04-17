@@ -29,6 +29,8 @@ def main(RV_ts, Prec_reg, ex):
     #%%
     if (ex['method'] == 'no_train_test_split') : ex['n_conv'] = 1
     if ex['method'][:5] == 'split' : ex['n_conv'] = 1
+    if ex['method'][:6] == 'random' : ex['tested_yrs'] = []
+    if ex['method'][:6] == 'random' : ex['n_conv'] = int(ex['n_yrs'] / int(ex['method'][6:])) 
     if ex['ROC_leave_n_out'] == True or ex['method'] == 'no_train_test_split': 
         print('leave_n_out set to False')
         ex['leave_n_out'] = False
@@ -66,7 +68,8 @@ def main(RV_ts, Prec_reg, ex):
                                               ex)    
         
 #        elif (ex['leave_n_out'] == True) & (ex['ROC_leave_n_out'] == False):
-        elif (ex['method'] == 'iter') or ex['method'][:5] == 'split' or ex['method'] == 'no_train_test_split':
+#        elif (ex['method'] == 'iter') or ex['method'][:5] == 'split' or ex['method'] == 'no_train_test_split':
+        elif train_all_test_n_out == False:
             # train each time on only train years
             ds_Sem = extract_precursor(Prec_reg, train, test, ex)    
             
@@ -108,7 +111,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
         
         general_folder = '{}_leave_{}_out_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}rm{}_{}'.format(
                             ex['method'], ex['leave_n_years_out'], ex['startyear'], ex['endyear'],
-                          ex['tfreq'], ex['event_thres'], ex['grid_res'],
+                          ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
                           ex['perc_map'], ex['comp_perc'], window, rmwhere, 
                           now.strftime("%Y-%m-%d"))
@@ -124,7 +127,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
     
         general_folder = 'hindcast_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}rm_{}'.format(
                           ex['startyear'], ex['endyear'],
-                          ex['tfreq'], ex['event_thres'], ex['grid_res'],
+                          ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
                           ex['perc_map'], ex['comp_perc'], ex['rollingmean'], 
                           now.strftime("%Y-%m-%d"))
@@ -136,7 +139,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
 
         general_folder = '{}_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}rm{}_{}'.format(
                             ex['method'], ex['startyear'], ex['endyear'],
-                          ex['tfreq'], ex['event_thres'], ex['grid_res'],
+                          ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
                           ex['perc_map'], ex['comp_perc'], window, rmwhere, 
                           now.strftime("%Y-%m-%d"))
@@ -207,14 +210,15 @@ def extract_precursor(Prec_reg, train, test, ex):
         std_train_min_lag[idx] = Prec_train.sel(time=dates_train_min_lag).std(dim='time')
         std_train_lag = std_train_min_lag[idx]
         
-        ts_3d = Prec_train.sel(time=dates_train_min_lag)
+        
         
         wghts_dur = np.sqrt(dur)
         
         #%%
         # extract precursor regions composite approach
         composite_p1, xrnpmap_p1, wghts_at_lag = extract_regs_p1(events_min_lag, wghts_dur,
-                                             ts_3d, std_train_lag, ex)  
+                                             Prec_train, dates_train_min_lag, std_train_lag, ex)  
+#        plt.figure()
 #        composite_p1.plot() 
 #        xrnpmap_p1.plot()
 
@@ -223,6 +227,8 @@ def extract_precursor(Prec_reg, train, test, ex):
         pat_num_CPPA[idx] = xrnpmap_p1
     
         weights[idx] = wghts_at_lag
+        
+
 
         #%%        
     ds_Sem = xr.Dataset( {'pattern_CPPA' : pattern_CPPA, 'pat_num_CPPA' : pat_num_CPPA,
@@ -239,7 +245,7 @@ def extract_precursor(Prec_reg, train, test, ex):
 # =============================================================================
 # =============================================================================
 
-def extract_regs_p1(events_min_lag, wghts_dur, ts_3d, std_train_lag, ex):
+def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, std_train_lag, ex):
     #%% 
 #    T, pval, mask_sig = Welchs_t_test(sample, full, alpha=0.01)
 #    threshold = np.reshape( mask_sig, (mask_sig.size) )
@@ -247,69 +253,110 @@ def extract_regs_p1(events_min_lag, wghts_dur, ts_3d, std_train_lag, ex):
 #    plt.figure()
 #    plt.imshow(mask_sig)
     # divide train set into train-feature and train-weights part:
+#    start = time.time()
+    
 
-    lats = ts_3d.latitude
-    lons = ts_3d.longitude
+    all_yrs_set = list(set(Prec_train.time.dt.year.values))    
     comp_years = list(events_min_lag.year.values)
+    n_yrs = len(all_yrs_set)
 
-
-    ts_3d_train_n = ts_3d/std_train_lag
-    
-    if ex['extra_wght_dur'] == True:
-    #    # add weights proportional to duration of events
-        wghts_dur[wghts_dur==0] = 1
-        ts_3d_train_n = ts_3d_train_n *  wghts_dur[:,None,None]
-    
-
-    all_yrs_set = list(set(ts_3d.time.dt.year.values))    
-    ex['n_ch1'] = 1
-    chunks = [all_yrs_set[i:(i+ex['n_ch1'])] for i in range(int(len(all_yrs_set)))]
-    years_n_out = [2, 3, 4, 5]
+    perc_yrs_out = [5, 7.5, 10, 12.5, 15]
+    years_n_out = [int(np.round(n_yrs*p/100., decimals=0)) for p in perc_yrs_out]
+    chunks = []
     for n_out in years_n_out:    
         chunks, count = create_chunks(all_yrs_set, n_out, chunks)
-  
-
-
+    
+    mask_chunk = np.zeros( (len(chunks), len(comp_years)) , dtype=bool)
+    for n, chnk in enumerate(chunks):
+#        yrs = list(chunks[n])
+        mask_true_idx = [i for i in range(len(comp_years)) if comp_years[i] not in chnk] 
+        mask_chunk[n][mask_true_idx] = True
+        
+        
     count = np.zeros( (len(all_yrs_set)) )
     for yr in all_yrs_set:
         idx = all_yrs_set.index(yr)
         count[idx] = np.sum( [chnk.count(yr) for chnk in chunks] )
 
-    iter_regions = np.zeros( (len(chunks), ts_3d[0].size))
     
-    for idx in range(len(chunks)):
-        yrs = chunks[idx]
-        yrs_trainfeat =  [i for i in all_yrs_set if i not in yrs] 
-        
-        # exclude years in event time series
-        one_out_idx_ev = [i for i in range(len(comp_years) ) if comp_years[i] in yrs_trainfeat]
-        event_one_out = events_min_lag[ one_out_idx_ev ]
-        comp_subset = ts_3d_train_n.sel(time=event_one_out)
-        
-        # region which are more constrained compared to whole training set 
-        # are given higher wgths
-#        wgths_constrain = (comp_subset.std(dim='time')/std_train_lag)
-        # normalized over whole training set
-        
-        mean = comp_subset.mean(dim='time') #/ comp_subset.std(dim='time')
-        
+    
+    
 
-        threshold = mean.quantile(ex['perc_map']/100).values
-        nparray = np.reshape(np.nan_to_num(mean.values), (mean.size))
-#            threshold = np.percentile(nparray, ex['perc_map'])
-        mask_threshold = np.array(abs(nparray) < ( threshold ), dtype=int)
-        Corr_Coeff = np.ma.MaskedArray(nparray, mask=mask_threshold)
-        Regions_lag_i = define_regions_and_rank_new(Corr_Coeff, lats.values, lons.values, ex)
-        iter_regions[idx] = Regions_lag_i
-#        if idx % 10 == 0.:
-#            plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.array(Regions_lag_i,dtype=int), (lats.size, lons.size)))
+    
+    #%%
 
+    def make_composites(mask_chunk, comp_train_stack, iter_regions):
+        
+        for subset_i in range(comp_train_stack.shape[0]):
+            comp_train_n = comp_train_stack[subset_i]
+            for idx in range(mask_chunk.shape[0]):
+                
+                comp_subset = comp_train_n[mask_chunk[idx], :]
+    
+                sumcomp = np.empty( comp_subset.shape[1] )
+                for i in range(comp_subset.shape[0]):
+                    sumcomp += comp_subset[i]
+                mean = sumcomp / comp_subset.shape[0]
+    
+                threshold = np.nanpercentile(mean, 95)
+                mean[np.isnan(mean)] = 0
+                idx += subset_i * mask_chunk.shape[0]
+
+                iter_regions[idx] = np.abs(mean) > ( threshold )
+
+            
+        return iter_regions
+    
+
+    
+    lats = Prec_train.latitude
+    lons = Prec_train.longitude    
+    days_before = [0, 2, 4]
+    comp_train_stack = np.empty( (3, events_min_lag.size, lats.size* lons.size), dtype='int16')
+    for i, d in enumerate(days_before):
+        
+        comp_train_i = Prec_train.sel(time=events_min_lag - pd.Timedelta(i, 'd'))
+        comp_train_n = np.array((comp_train_i/std_train_lag)*1000, dtype='int16')
+        comp_train_n = np.reshape(comp_train_n, 
+                              (events_min_lag.size,lats.size*lons.size))
+        comp_train_stack[i] = comp_train_n
+    
+    
+    iter_regions = np.empty( (len(chunks) * len(days_before), comp_train_n[0].size), dtype='int8')
+
+#    chunks = np.array([tuple(i) for i in chunks])
+#    chunks = tuple([np.array(x, copy=False, order='C') for x in chunks])
+#    iter_regions = make_composites(mask_chunk, comp_train_stack, iter_regions)
+    jit_make_composites = numba.jit(nopython=True, parallel=True)(make_composites)
+    
+    iter_regions = jit_make_composites(mask_chunk, comp_train_stack, iter_regions)
+    
+    #%%
+
+    
+    #%%
+    def make_composites_numpy(mask_chunk, comp_train_n, iter_regions):
+    
+        for idx in range(mask_chunk.shape[0]):
+
+            comp_subset = comp_train_n[mask_chunk[idx], :]
+            mean = np.mean(comp_subset, 0)
+  
+            threshold = np.nanpercentile(mean, 95)
+            mean[np.isnan(mean)] = 0
+            
+ 
+            iter_regions[idx] = np.abs(mean) > ( threshold )
+        return iter_regions
+    
+    
+    #%%
 
     mask_reg_all_1 = (iter_regions != 0.)
     reg_all_1 = iter_regions.copy()
     reg_all_1[mask_reg_all_1] = 1
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(reg_all_1, axis=0), (lats.size, lons.size))) ; plt.colorbar()
-    mask_final = ( np.sum(reg_all_1, axis=0) < int(ex['comp_perc'] * len(chunks)))
+    mask_final = ( np.sum(reg_all_1, axis=0) < int(ex['comp_perc'] * iter_regions.shape[0]))
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.array(mask_final,dtype=int), (lats.size, lons.size))) 
 #    %%
     weights = np.sum(reg_all_1, axis=0)
@@ -317,7 +364,7 @@ def extract_regs_p1(events_min_lag, wghts_dur, ts_3d, std_train_lag, ex):
     sum_count = np.reshape(weights, (lats.size, lons.size))
     weights = sum_count / np.max(sum_count)
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(weights, (lats.size, lons.size)))
-    composite_p1 = ts_3d.sel(time=events_min_lag).mean(dim='time')
+    composite_p1 = Prec_train.sel(time=events_min_lag).mean(dim='time')
     nparray_comp = np.reshape(np.nan_to_num(composite_p1.values), (composite_p1.size))
     Corr_Coeff = np.ma.MaskedArray(nparray_comp, mask=mask_final)
     lat_grid = composite_p1.latitude.values
@@ -326,7 +373,8 @@ def extract_regs_p1(events_min_lag, wghts_dur, ts_3d, std_train_lag, ex):
 
     # retrieve regions sorted in order of 'strength'
     # strength is defined as an area weighted values in the composite
-    Regions_lag_i = define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, ex)
+    A_gs = get_area(Prec_train[0])
+    Regions_lag_i = define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, A_gs, ex)
     
     assert np.sum(Regions_lag_i) != 0., ('No regions detected with these criteria.')
         
@@ -355,10 +403,10 @@ def extract_regs_p1(events_min_lag, wghts_dur, ts_3d, std_train_lag, ex):
     xrnpmap_init = xrnpmap_init.where(xrnpmap_init.mask==True)
 
 
-
+#    print( time.time() - start )
 
 #    plt.figure()
-#    xrnpmap_init.plot.contourf(cmap=plt.cm.tab10)   
+#    xrnpmap_init.plot.pcolormesh(cmap=plt.cm.tab10)   
 #    composite_p1.plot.contourf()  
 #    list_region_info = [Regions_lag_i, ts_regions_lag_i, sign_ts_regions, weights]
     #%%
@@ -547,11 +595,20 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         # Divide into random sampled 25 year for train & rest for test
     #        n_years_sampled = int((ex['endyear'] - ex['startyear']+1)*0.66)
         if ex['method'][:6] == 'random':
-            size_train = int(np.percentile(range(len(all_years)), int(ex['method'][6:])))
-            size_test  = len(all_years) - size_train
+            if ex['n'] == 0: ex['tested_yrs'] = []
+            size_test  = int(ex['method'][6:])
+            size_train = int(ex['n_yrs'] - size_test)
+
             ex['leave_n_years_out'] = size_test
-            ex['n_stop'] = int(len(all_years) / size_test) + 33
-            rand_test_years = np.random.choice(all_years, ex['leave_n_years_out'], replace=False)
+            yrs_to_draw_sample = [yr for yr in all_years if yr not in flatten(ex['tested_yrs'])]
+            if (len(yrs_to_draw_sample) - size_test) > size_test:
+                rand_test_years = np.random.choice(yrs_to_draw_sample, ex['leave_n_years_out'], replace=False)
+            # if last test sample will be too small for next iteration, add test yrs to current test yrs
+            if (len(yrs_to_draw_sample) - size_test) < size_test:
+                rand_test_years = yrs_to_draw_sample  
+
+                
+            
         elif ex['method'] == 'iter':
             ex['leave_n_years_out'] = 1
             if ex['n'] >= ex['n_yrs']:
@@ -559,20 +616,20 @@ def rand_traintest(RV_ts, Prec_reg, ex):
             else:
                 n = ex['n']
             rand_test_years = [all_years[n]]
+            
         elif ex['method'][:5] == 'split':
             size_train = int(np.percentile(range(len(all_years)), int(ex['method'][5:])))
             size_test  = len(all_years) - size_train
             ex['leave_n_years_out'] = size_test
             print('Using {} years to train and {} to test'.format(size_train, size_test))
             rand_test_years = all_years[-size_test:]
-#        elif ex['method'] == 'no_train_test_split':
-#            ex['leave_n_years_out'] = 0
-#            rand_test_years = []
-            
+        
+        
     
             
         # test duplicates
-        a_conditions_failed = (len(set(rand_test_years)) != ex['leave_n_years_out'])
+        a_conditions_failed = np.logical_and((len(set(rand_test_years)) != ex['leave_n_years_out']),
+                                             ex['n'] != ex['n_conv']-1)
         # Update random years to be selected as test years:
     #        initial_years = [yr for yr in initial_years if yr not in random_test_years]
         rand_train_years = [yr for yr in all_years if yr not in rand_test_years]
@@ -602,19 +659,19 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         
         ave_events_pyr = (len(event_train) + len(event_test))/len(all_years)
         exp_events     = int(ave_events_pyr) * len(rand_test_years)
-        tolerance      = 0.2 * exp_events
+        tolerance      = 0.4 * exp_events
         diff           = abs(len(event_test) - exp_events)
         
-        print('test year is {}, with {} events'.format(test_years, len(event_test)))
-        if diff > tolerance and ex['method']=='random': 
+        print('{}: test year is {}, with {} events'.format(ex['n'], test_years, len(event_test)))
+        if diff > tolerance and ex['method'][:6] == 'random' and ex['n'] != ex['n_conv']-1: 
             print('not a representative sample, drawing new sample')
             a_conditions_failed = True
                    
-        
-        train = dict( {    'RV'             : RV_train,
-                           'Prec_train_idx' : Prec_train_idx})
-        test = dict( {     'RV'             : RV_test,
-                           'Prec_test_idx'  : Prec_test_idx})
+    ex['tested_yrs'].append(rand_test_years)
+    train = dict( {    'RV'             : RV_train,
+                       'Prec_train_idx' : Prec_train_idx})
+    test = dict( {     'RV'             : RV_test,
+                       'Prec_test_idx'  : Prec_test_idx})
     #%%
     return train, test, test_years
 
@@ -786,7 +843,7 @@ def create_chunks(all_yrs_set, n_out, chunks):
     return chunks, count
 
 
-def define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, ex):
+def define_regions_and_rank_new(Corr_Coeff, lats, lons, A_gs, ex):
     #%%
     '''
 	takes Corr Coeffs and defines regions by strength
@@ -810,8 +867,8 @@ def define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, ex):
 
     indices_not_masked = np.where(A.mask==False)[0].tolist()
 
-    lo = lon_grid.shape[0]
-    la = lat_grid.shape[0]
+    lo = lons.shape[0]
+    la = lats.shape[0]
 	
 	# create list of potential neighbors:
     N_pot=[[] for i in range(A.shape[0])]
@@ -935,17 +992,23 @@ def define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, ex):
     B = np.abs(A)
 	
 	# 3) calculate the area size of each region	
-	
+#    Area =  [[] for i in range(len(Regions))]
+#	
+#    for i in range(len(Regions)):
+#        indices = np.array(list(Regions[i]))
+#        indices_lat_position = indices//lo
+#        lat_nodes = lats[indices_lat_position[:]]
+#        cos_nodes = np.cos(np.deg2rad(lat_nodes))		
+#		
+#        area_i = [np.sum(cos_nodes)]
+#        Area[i]= Area[i]+area_i
+    
     Area =  [[] for i in range(len(Regions))]
-	
+    A_gs_flat = np.reshape(A_gs, -1)
     for i in range(len(Regions)):
         indices = np.array(list(Regions[i]))
-        indices_lat_position = indices//lo
-        lat_nodes = lat_grid[indices_lat_position[:]]
-        cos_nodes = np.cos(np.deg2rad(lat_nodes))		
-		
-        area_i = [np.sum(cos_nodes)]
-        Area[i]= Area[i]+area_i
+        Area[i] = np.sum(A_gs_flat[indices])
+    
 	
 	#---------------------------------------
 	# OPTIONAL: Exclude regions which only consist of less than n nodes
@@ -953,17 +1016,18 @@ def define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, ex):
 	#---------------------------------------	
 	
     # keep only regions which are larger then the mean size of the regions
-    if ex['min_n_gc'] == 'mean':
-        n_nodes = int(np.mean([len(r) for r in Regions]))
+    if ex['min_perc_prec_area'] == 'mean':
+        n_nodes = np.mean(Area)
     else:
-        n_nodes = ex['min_n_gc']
+        n_nodes = ex['min_perc_prec_area']
     
     R=[]
     Ar=[]
     for i in range(len(Regions)):
-        if len(Regions[i])>=n_nodes:
-            R.append(Regions[i])
+        if Area[i] > n_nodes * np.sum(A_gs):
             Ar.append(Area[i])
+            R.append(Regions[i])
+            
 	
     Regions = R
     Area = Ar	
@@ -1542,7 +1606,7 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     PRECURSOR_LONGITIUDE = l_ds[0]['pat_num_CPPA'].longitude.values
     PRECURSOR_LATITUDE = l_ds[0]['pat_num_CPPA'].latitude.values
     PRECURSOR_LAGS = l_ds[0]['pat_num_CPPA'].sel(lag=ex['lags']).lag.values
-    PRECURSOR_YEARS = np.arange(ex['startyear'],ex['endyear']+1E-9)#[np.unique(test['RV'].time.dt.year) for test in ex['train_test_list'][:][1]][0]
+    PRECURSOR_N_TEST_SETS = ex['n_conv']
     
     # Precursor Grid (to calculate precursor region centre coordinate)
     PRECURSOR_GRID = np.zeros((len(PRECURSOR_LATITUDE), len(PRECURSOR_LONGITIUDE), 2))
@@ -1552,7 +1616,7 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     precursor_coordinates = []
     
     # Array Containing Precursor Region Indices for each YEAR 
-    precursor_indices = np.empty((len(PRECURSOR_YEARS),
+    precursor_indices = np.empty((PRECURSOR_N_TEST_SETS,
                                   len(PRECURSOR_LAGS),
                                   len(PRECURSOR_LATITUDE),
                                   len(PRECURSOR_LONGITIUDE)),
@@ -1573,7 +1637,7 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     
     #    precursor_weights = np.zeros_like(precursor_indices, np.float32)
         min_samples = []
-        for test_idx, year in enumerate(PRECURSOR_YEARS):
+        for test_idx in range(PRECURSOR_N_TEST_SETS):
             indices = indices_across_yrs[test_idx, :, :]
             min_samples.append( np.nanmax(indices) )
             for region_idx in np.unique(indices[~np.isnan(indices)]):
@@ -1617,7 +1681,7 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     
     
     l_ds_new = []
-    for test_idx, year in enumerate(PRECURSOR_YEARS):
+    for test_idx in range(PRECURSOR_N_TEST_SETS):
         single_ds = l_ds[test_idx]
         pattern   = single_ds['pat_num_CPPA']
         
@@ -1638,8 +1702,24 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     #%%
     return l_ds_new
 
-
-
+def get_area(ds):
+    longitude = ds.longitude
+    latitude = ds.latitude
+    
+    Erad = 6.371e6 # [m] Earth radius
+#    global_surface = 510064471909788
+    # Semiconstants
+    gridcell = np.abs(longitude[1] - longitude[0]).values # [degrees] grid cell size
+    
+    # new area size calculation:
+    lat_n_bound = np.minimum(90.0 , latitude + 0.5*gridcell)
+    lat_s_bound = np.maximum(-90.0 , latitude - 0.5*gridcell)
+    
+    A_gridcell = np.zeros([len(latitude),1])
+    A_gridcell[:,0] = (np.pi/180.0)*Erad**2 * abs( np.sin(lat_s_bound*np.pi/180.0) - np.sin(lat_n_bound*np.pi/180.0) ) * gridcell
+    A_gridcell2D = np.tile(A_gridcell,[1,len(longitude)])
+#    A_mean = np.mean(A_gridcell2D)
+    return A_gridcell2D
 # =============================================================================
 # =============================================================================
 # Plotting functions
@@ -2078,7 +2158,7 @@ def figure_for_schematic(reg_all_1, composite_p1, chunks, lats, lons, ex):
 
     # retrieve regions sorted in order of 'strength'
     # strength is defined as an area weighted values in the composite
-    Regions_lag_i = define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, ex)
+    Regions_lag_i = define_regions_and_rank_new(Corr_Coeff, lat_grid, lon_grid, A_gs, ex)
 
     # reshape to latlon grid
     npmap = np.reshape(Regions_lag_i, (lats.size, lons.size))

@@ -196,7 +196,7 @@ def extract_precursor(Prec_reg, train, test, ex):
     RV_event_train = pd.to_datetime(RV_event_train.time.values)
 
     RV_dates_train = pd.to_datetime(train['RV'].time.values)
-
+    #%%
     for lag in ex['lags']:
 
         idx = ex['lags'].index(lag)
@@ -260,7 +260,7 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
     comp_years = list(events_min_lag.year.values)
     n_yrs = len(all_yrs_set)
 
-    perc_yrs_out = [5, 7.5, 10, 12.5, 15]
+    perc_yrs_out = [5, 10, 12.5, 15, 20]
     years_n_out = [int(np.round(n_yrs*p/100., decimals=0)) for p in perc_yrs_out]
     chunks = []
     for n_out in years_n_out:    
@@ -279,21 +279,18 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
         count[idx] = np.sum( [chnk.count(yr) for chnk in chunks] )
 
     
-    
-    
 
-    
-    #%%
-
+    import numba
     def make_composites(mask_chunk, comp_train_stack, iter_regions):
         
+        
         for subset_i in range(comp_train_stack.shape[0]):
-            comp_train_n = comp_train_stack[subset_i]
+            comp_train_n = comp_train_stack[subset_i, :, :]
             for idx in range(mask_chunk.shape[0]):
-                
+#                comp_train_stack[subset_i, mask_chunk[idx], :]
                 comp_subset = comp_train_n[mask_chunk[idx], :]
     
-                sumcomp = np.empty( comp_subset.shape[1] )
+                sumcomp = np.zeros( comp_subset.shape[1] )
                 for i in range(comp_subset.shape[0]):
                     sumcomp += comp_subset[i]
                 mean = sumcomp / comp_subset.shape[0]
@@ -307,59 +304,66 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
             
         return iter_regions
     
-
+    #%%
+#    def make_composites_one(mask_chunk, comp_train_n, iter_regions):
+#        
+#        
+##            comp_train_n = comp_train_stack[subset_i, :, :]
+#        for idx in range(mask_chunk.shape[0]):
+##                comp_train_stack[subset_i, mask_chunk[idx], :]
+#            comp_subset = comp_train_n[mask_chunk[idx], :]
+#
+#            sumcomp = np.zeros( comp_subset.shape[1] )
+#            for i in range(comp_subset.shape[0]):
+#                sumcomp += comp_subset[i]
+#            mean = sumcomp / comp_subset.shape[0]
+#
+#            threshold = np.nanpercentile(mean, 95)
+#            mean[np.isnan(mean)] = 0
+##            idx += subset_i * mask_chunk.shape[0]
+#
+#            iter_regions[idx, :] = np.abs(mean) >  threshold 
+#
+#            
+#        return iter_regions, mean
+    
+#%%
     
     lats = Prec_train.latitude
     lons = Prec_train.longitude    
+    lsm  = np.isnan(Prec_train[0])
     days_before = [0, 2, 4]
-    comp_train_stack = np.empty( (3, events_min_lag.size, lats.size* lons.size), dtype='int16')
+    comp_train_stack = np.empty( (len(days_before), events_min_lag.size, lats.size* lons.size), dtype='int16')
     for i, d in enumerate(days_before):
-        
-        comp_train_i = Prec_train.sel(time=events_min_lag - pd.Timedelta(i, 'd'))
+        Prec_RV_train = Prec_train.sel(time=dates_train_min_lag - pd.Timedelta(d, 'd'))
+        comp_train_i = Prec_RV_train.sel(time=events_min_lag - pd.Timedelta(d, 'd'))
         comp_train_n = np.array((comp_train_i/std_train_lag)*1000, dtype='int16')
-        comp_train_n = np.reshape(comp_train_n, 
+        comp_train_n[:,lsm] = 0
+        
+        comp_train_n = np.reshape(np.nan_to_num(comp_train_n), 
                               (events_min_lag.size,lats.size*lons.size))
         comp_train_stack[i] = comp_train_n
-    
-    
-    iter_regions = np.empty( (len(chunks) * len(days_before), comp_train_n[0].size), dtype='int8')
+#        plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.mean(comp_subset, axis=0), (lats.size, lons.size))) ; plt.colorbar()
+#        plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(mean, (lats.size, lons.size))) ; plt.colorbar()
+        
+#    iter_regions_in = np.empty( (len(chunks) * len(days_before), comp_train_n[0].size), dtype='int64')
 
-#    chunks = np.array([tuple(i) for i in chunks])
-#    chunks = tuple([np.array(x, copy=False, order='C') for x in chunks])
-#    iter_regions = make_composites(mask_chunk, comp_train_stack, iter_regions)
-    jit_make_composites = numba.jit(nopython=True, parallel=True)(make_composites)
+
+    jit_make_composites = numba.jit(nopython=True)(make_composites)
     
+    iter_regions = np.zeros( (comp_train_stack.shape[0]*len(mask_chunk), comp_train_stack[0,0].size), dtype='int8')
     iter_regions = jit_make_composites(mask_chunk, comp_train_stack, iter_regions)
     
-    #%%
 
-    
-    #%%
-    def make_composites_numpy(mask_chunk, comp_train_n, iter_regions):
-    
-        for idx in range(mask_chunk.shape[0]):
 
-            comp_subset = comp_train_n[mask_chunk[idx], :]
-            mean = np.mean(comp_subset, 0)
-  
-            threshold = np.nanpercentile(mean, 95)
-            mean[np.isnan(mean)] = 0
-            
- 
-            iter_regions[idx] = np.abs(mean) > ( threshold )
-        return iter_regions
-    
-    
+#    iter_regions = make_composites(mask_chunk, comp_train_stack, iter_regions)
+#    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(iter_regions_in, axis=0), (lats.size, lons.size))) ; plt.colorbar()
+#    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(iter_regions, axis=0), (lats.size, lons.size))) ; plt.colorbar()
     #%%
-
-    mask_reg_all_1 = (iter_regions != 0.)
-    reg_all_1 = iter_regions.copy()
-    reg_all_1[mask_reg_all_1] = 1
-#    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(reg_all_1, axis=0), (lats.size, lons.size))) ; plt.colorbar()
-    mask_final = ( np.sum(reg_all_1, axis=0) < int(ex['comp_perc'] * iter_regions.shape[0]))
+    mask_final = ( np.sum(iter_regions, axis=0) < int(ex['comp_perc'] * iter_regions.shape[0]))
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.array(mask_final,dtype=int), (lats.size, lons.size))) 
 #    %%
-    weights = np.sum(reg_all_1, axis=0)
+    weights = np.sum(iter_regions, axis=0)
     weights[mask_final==True] = 0.
     sum_count = np.reshape(weights, (lats.size, lons.size))
     weights = sum_count / np.max(sum_count)
@@ -406,7 +410,7 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
 #    print( time.time() - start )
 
 #    plt.figure()
-#    xrnpmap_init.plot.pcolormesh(cmap=plt.cm.tab10)   
+    xrnpmap_init.plot.pcolormesh(cmap=plt.cm.tab10)   
 #    composite_p1.plot.contourf()  
 #    list_region_info = [Regions_lag_i, ts_regions_lag_i, sign_ts_regions, weights]
     #%%
@@ -1017,14 +1021,14 @@ def define_regions_and_rank_new(Corr_Coeff, lats, lons, A_gs, ex):
 	
     # keep only regions which are larger then the mean size of the regions
     if ex['min_perc_prec_area'] == 'mean':
-        n_nodes = np.mean(Area)
+        min_area = np.mean(Area) # mean area of all regions
     else:
-        n_nodes = ex['min_perc_prec_area']
+        min_area = (ex['min_perc_prec_area']/100.) * np.sum(A_gs) 
     
     R=[]
     Ar=[]
     for i in range(len(Regions)):
-        if Area[i] > n_nodes * np.sum(A_gs):
+        if Area[i] > min_area: # area of regions must be larger then min_area
             Ar.append(Area[i])
             R.append(Regions[i])
             

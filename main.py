@@ -67,8 +67,8 @@ ex['rollingmean']       =       ('CPPA', 1)
 ex['extra_wght_dur']    =       False
 ex['prec_reg_max_d']    =       1
 ex['perc_map']          =       95
-ex['comp_perc']         =       0.80
-ex['min_perc_prec_area']=       0.001 # min size region - in % of total prec area [m2]
+ex['comp_perc']         =       0.90
+ex['min_perc_prec_area']=       0.05 # min size region - in % of total prec area [m2]
 ex['wghts_accross_lags']=       False
 # =============================================================================
 # Settings for validation     
@@ -111,7 +111,7 @@ def printset(print_ex=print_ex, ex=ex):
 
 printset()
 n = 1
-ex['n'] = n
+ex['n'] = n ; lag=0
 #%% Run code with ex settings
 
 

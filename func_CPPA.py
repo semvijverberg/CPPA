@@ -279,7 +279,22 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
         count[idx] = np.sum( [chnk.count(yr) for chnk in chunks] )
 
     
-
+    
+    lats = Prec_train.latitude
+    lons = Prec_train.longitude    
+    lsm  = np.isnan(Prec_train[0])
+    days_before = [0, 2, 4]
+    comp_train_stack = np.empty( (len(days_before), events_min_lag.size, lats.size* lons.size), dtype='int16')
+    for i, d in enumerate(days_before):
+        Prec_RV_train = Prec_train.sel(time=dates_train_min_lag - pd.Timedelta(d, 'd'))
+        comp_train_i = Prec_RV_train.sel(time=events_min_lag - pd.Timedelta(d, 'd'))
+        comp_train_n = np.array((comp_train_i/std_train_lag)*1000, dtype='int16')
+        comp_train_n[:,lsm] = 0
+        
+        comp_train_n = np.reshape(np.nan_to_num(comp_train_n), 
+                              (events_min_lag.size,lats.size*lons.size))
+        comp_train_stack[i] = comp_train_n
+        
     import numba
     def make_composites(mask_chunk, comp_train_stack, iter_regions):
         
@@ -303,50 +318,9 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
 
             
         return iter_regions
-    
-    #%%
-#    def make_composites_one(mask_chunk, comp_train_n, iter_regions):
-#        
-#        
-##            comp_train_n = comp_train_stack[subset_i, :, :]
-#        for idx in range(mask_chunk.shape[0]):
-##                comp_train_stack[subset_i, mask_chunk[idx], :]
-#            comp_subset = comp_train_n[mask_chunk[idx], :]
-#
-#            sumcomp = np.zeros( comp_subset.shape[1] )
-#            for i in range(comp_subset.shape[0]):
-#                sumcomp += comp_subset[i]
-#            mean = sumcomp / comp_subset.shape[0]
-#
-#            threshold = np.nanpercentile(mean, 95)
-#            mean[np.isnan(mean)] = 0
-##            idx += subset_i * mask_chunk.shape[0]
-#
-#            iter_regions[idx, :] = np.abs(mean) >  threshold 
-#
-#            
-#        return iter_regions, mean
+
     
 #%%
-    
-    lats = Prec_train.latitude
-    lons = Prec_train.longitude    
-    lsm  = np.isnan(Prec_train[0])
-    days_before = [0, 2, 4]
-    comp_train_stack = np.empty( (len(days_before), events_min_lag.size, lats.size* lons.size), dtype='int16')
-    for i, d in enumerate(days_before):
-        Prec_RV_train = Prec_train.sel(time=dates_train_min_lag - pd.Timedelta(d, 'd'))
-        comp_train_i = Prec_RV_train.sel(time=events_min_lag - pd.Timedelta(d, 'd'))
-        comp_train_n = np.array((comp_train_i/std_train_lag)*1000, dtype='int16')
-        comp_train_n[:,lsm] = 0
-        
-        comp_train_n = np.reshape(np.nan_to_num(comp_train_n), 
-                              (events_min_lag.size,lats.size*lons.size))
-        comp_train_stack[i] = comp_train_n
-#        plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.mean(comp_subset, axis=0), (lats.size, lons.size))) ; plt.colorbar()
-#        plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(mean, (lats.size, lons.size))) ; plt.colorbar()
-        
-#    iter_regions_in = np.empty( (len(chunks) * len(days_before), comp_train_n[0].size), dtype='int64')
 
 
     jit_make_composites = numba.jit(nopython=True)(make_composites)
@@ -361,8 +335,7 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(iter_regions, axis=0), (lats.size, lons.size))) ; plt.colorbar()
     #%%
     mask_final = ( np.sum(iter_regions, axis=0) < int(ex['comp_perc'] * iter_regions.shape[0]))
-#    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.array(mask_final,dtype=int), (lats.size, lons.size))) 
-#    %%
+
     weights = np.sum(iter_regions, axis=0)
     weights[mask_final==True] = 0.
     sum_count = np.reshape(weights, (lats.size, lons.size))
@@ -383,15 +356,7 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
     assert np.sum(Regions_lag_i) != 0., ('No regions detected with these criteria.')
         
     
-    # Regions are iteratively counted starting from first lag (R0) to last lag R(-1)
-    # adapt numbering of different communities/Regions to account for 
-    # multiple variables/lags
-#    if Regions_lag_i.max()> 0:
-#        n_regions_lag_i = int(Regions_lag_i.max()) 	
-
-#    # if there are less regions that are desired, the n_strongest is lowered
-#    if n_regions_lag_i <= ex['n_strongest']:
-#        ex['upd_n_strongest'] = n_regions_lag_i
+#    cross_correlation_patterns(Prec_train, composite_p1.where(composite_p1.mask==True))
                
     
     # reshape to latlon grid

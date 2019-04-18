@@ -53,7 +53,6 @@ ex = {'grid_res'    :       1.0,
      'name'         :       'sst',
      'add_lsm'      :       False,
      'region'       :       'Northern',
-     'regionmcK'    :       'PEPrectangle',
      'lags'         :       [0, 15, 30, 50], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
      'plot_ts'      :       True,
      }
@@ -73,7 +72,7 @@ ex['rollingmean']       =       ('CPPA', 1)
 ex['extra_wght_dur']    =       False
 ex['prec_reg_max_d']    =       1
 ex['perc_map']          =       95
-ex['comp_perc']         =       0.9
+ex['comp_perc']         =       0.8
 ex['min_perc_prec_area']=       0.002 # min size region - in % of total prec area [m2]
 ex['wghts_accross_lags']=       False
 # =============================================================================
@@ -87,8 +86,8 @@ ex['method']            =       'random3' #'iter' or 'no_train_test_split' or sp
 # =============================================================================
 RV_ts, Prec_reg, ex = load_data.load_data(ex)
 
-ex['exppathbase'] = '{}_{}_{}_{}'.format(ex['RV_name'],ex['name'],
-                      ex['region'], ex['regionmcK'])
+ex['exppathbase'] = '{}_{}_{}'.format(ex['RV_name'],ex['name'],
+                      ex['region'])
 ex['figpathbase'] = os.path.join(ex['figpathbase'], ex['exppathbase'])
 if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
 
@@ -101,7 +100,7 @@ print_ex = ['RV_name', 'name', 'max_break',
             'perc_map', 'tfreq', 'lags', 'n_yrs', 
             'rollingmean', 'event_percentile',
             'event_thres', 'perc_map', 'comp_perc', 'extra_wght_dur',
-            'region', 'regionmcK',
+            'region', 
             'add_lsm', 'min_perc_prec_area', 'prec_reg_max_d']
 
 def printset(print_ex=print_ex, ex=ex):

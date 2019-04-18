@@ -5,7 +5,13 @@ Created on Mon Dec 10 10:31:42 2018
 """
 
 import os, sys
-os.chdir('/Users/semvijverberg/surfdrive/Scripts/CPPA/CPPA')
+
+
+if os.path.isdir("/Users/semvijverberg/surfdrive/"):
+    basepath = "/Users/semvijverberg/surfdrive/"
+else:
+    basepath = "/home/semvij/"
+os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
 sys.path.append(script_dir)
 if sys.version[:1] == '3':
@@ -27,7 +33,7 @@ xrplot = func_CPPA.xarray_plot
 
 
 
-path_pp  = "/Users/semvijverberg/surfdrive/Data_era5/input_pp" # path to netcdfs
+path_pp  = os.path.join(basepath, 'Data_era5/input_pp') # path to netcdfs
 if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 
 
@@ -40,15 +46,15 @@ ex = {'grid_res'    :       1.0,
      'path_pp'      :       path_pp,
      'startperiod'   :       '06-24', #'1982-06-24',
      'endperiod'     :       '08-22', #'1982-08-22',
-     'figpathbase'  :       "/Users/semvijverberg/surfdrive/McKinRepl/",
-     'RV1d_ts_path' :       "/Users/semvijverberg/surfdrive/MckinRepl/RVts",
+     'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
+     'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
      'RVts_filename':       "t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1.npy",
      'RV_name'      :       'T2mmax',
      'name'         :       'sst',
      'add_lsm'      :       False,
      'region'       :       'Northern',
      'regionmcK'    :       'PEPrectangle',
-     'lags'         :       [0, 5, 10, 15, 20, 30, 40, 50, 60, 70], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
+     'lags'         :       [0, 15, 30, 50], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
      'plot_ts'      :       True,
      }
 # =============================================================================
@@ -67,19 +73,18 @@ ex['rollingmean']       =       ('CPPA', 1)
 ex['extra_wght_dur']    =       False
 ex['prec_reg_max_d']    =       1
 ex['perc_map']          =       95
-ex['comp_perc']         =       0.90
-ex['min_perc_prec_area']=       0.05 # min size region - in % of total prec area [m2]
+ex['comp_perc']         =       0.9
+ex['min_perc_prec_area']=       0.002 # min size region - in % of total prec area [m2]
 ex['wghts_accross_lags']=       False
 # =============================================================================
 # Settings for validation     
 # =============================================================================
-ex['leave_n_out']       =       True,
-ex['ROC_leave_n_out']   =       False,
+ex['leave_n_out']       =       True
+ex['ROC_leave_n_out']   =       False
 ex['method']            =       'random3' #'iter' or 'no_train_test_split' or split#8 or random3  
-
-
-
-
+# =============================================================================
+# load data (write your own function load_data(ex) )
+# =============================================================================
 RV_ts, Prec_reg, ex = load_data.load_data(ex)
 
 ex['exppathbase'] = '{}_{}_{}_{}'.format(ex['RV_name'],ex['name'],
@@ -218,17 +223,11 @@ ex = ROC_score_wrapper(ex)
 
 lats = Prec_reg.latitude
 lons = Prec_reg.longitude
-array = np.zeros( (ex['n_conv'], len(ex['lags']), len(lats), len(lons)) )
-patterns_Sem = xr.DataArray(data=array, coords=[range(ex['n_conv']), ex['lags'], lats, lons], 
+array = np.zeros( (len(l_ds_CPPA), len(ex['lags']), len(lats), len(lons)) )
+patterns_Sem = xr.DataArray(data=array, coords=[range(len(l_ds_CPPA)), ex['lags'], lats, lons], 
                       dims=['n_tests', 'lag','latitude','longitude'], 
-                      name='{}_tests_patterns_Sem'.format(ex['n_conv']), attrs={'units':'Kelvin'})
-Prec_mcK = func_CPPA.find_region(Prec_reg, region=ex['region'])[0][0]
-lats = Prec_mcK.latitude
-lons = Prec_mcK.longitude
-array = np.zeros( (ex['n_conv'], len(ex['lags']), len(lats), len(lons)) )
-patterns_mcK = xr.DataArray(data=array, coords=[range(ex['n_conv']), ex['lags'], lats, lons], 
-                      dims=['n_tests', 'lag','latitude','longitude'], 
-                      name='{}_tests_patterns_mcK'.format(ex['n_conv']), attrs={'units':'Kelvin'})
+                      name='{}_tests_patterns_Sem'.format(len(l_ds_CPPA)), attrs={'units':'Kelvin'})
+
 
 for n in range(len(ex['train_test_list'])):
 #    ex['n'] = n
@@ -238,11 +237,11 @@ for n in range(len(ex['train_test_list'])):
     name_for_ts = 'CPPA'
         
     if (ex['method'][:6] == 'random'):
-        if n == ex['n_stop']:
+        if n == len(l_ds_CPPA):
             # remove empty n_tests
-            patterns_Sem = patterns_Sem.sel(n_tests=slice(0,ex['n_stop']))
-            patterns_mcK = patterns_mcK.sel(n_tests=slice(0,ex['n_stop']))
-            ex['n_conv'] = ex['n_stop']
+            patterns_Sem = patterns_Sem.sel(n_tests=slice(0,len(l_ds_CPPA)))
+
+#            ex['n_conv'] = ex['n_stop']
     
     upd_pattern = l_ds_CPPA[n]['pattern_' + name_for_ts].sel(lag=ex['lags'])
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
@@ -265,64 +264,8 @@ mean_n_patterns.name = 'ROC {}'.format(score_Sem)
 filename = os.path.join(ex['exp_folder'], 'mean_over_{}_tests'.format(ex['n_conv']) )
 func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
-
-
-
-
-
-
-#%% Robustness of training precursor regions
-
-subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
-total_folder = os.path.join(ex['figpathbase'], subfolder)
-if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-years = range(ex['startyear'], ex['endyear'])
-
-#n_land = np.sum(np.array(np.isnan(Prec_reg.values[0]),dtype=int) )
-#n_sea = Prec_reg[0].size - n_land
-if ex['method'] == 'iter':
-    test_set_to_plot = [1990, 2000, 2010, 2012, 2015]
-elif ex['method'][:6] == 'random':
-    test_set_to_plot = [set(t[1]['RV'].time.dt.year.values) for t in ex['train_test_list'][::5]]
-#test_set_to_plot = list(np.arange(0,ex['n_conv'],5))
-for yr in test_set_to_plot: 
-    n = test_set_to_plot.index(yr)
-    Robustness_weights = l_ds_CPPA[n]['weights'].sel(lag=ex['lags'])
-    size_trainset = ex['n_yrs'] - ex['leave_n_years_out']
-    Robustness_weights.attrs['title'] = ('Robustness\n test yr(s): {}, single '
-                            'training set (n={} yrs)'.format(yr,size_trainset))
-    Robustness_weights.attrs['units'] = 'Weights [{} ... 1]'.format(ex['comp_perc'])
-    filename = os.path.join(subfolder, Robustness_weights.attrs['title'].replace(
-                            ' ','_')+'.png')
-    for_plt = Robustness_weights.where(Robustness_weights.values != 0).copy()
-#    n_pattern = Prec_reg[0].size - np.sum(np.array(np.isnan(for_plt[0]),dtype=int))
     
-    if ex['n_conv'] == 1:
-        steps = 19
-    else:
-        steps = 11
-    kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
-                   'steps' : 11, 'subtitles': ROC_str_Sem, 
-                   'vmin' : ex['comp_perc'], 'vmax' : for_plt.max().values+1E-9, 
-                   'cmap' : plt.cm.viridis_r, 'column' : 2,
-                   'cbar_vert' : 0.05, 'cbar_hght' : 0.01,
-                   'adj_fig_h' : 1.25, 'adj_fig_w' : 1., 
-                   'hspace' : 0.02, 'wspace' : 0.08} )
-    
-    func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
-    
-    
-#%%
 
-filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-dicRV = np.load(filename,  encoding='latin1').item()
-folder = os.path.join(ex['figpathbase'], ex['exp_folder'])
-xarray_plot(dicRV['mask'], path=folder, name='RV_mask', saving=True)
-    
-func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=True)
-## plotting same figure as in paper
-#for i in range(2005, 2010):
-#    func_CPPA.plot_oneyr_events(RV_ts, ex, i, folder, saving=True)
 
 #%% Robustness accross training sets
 #    ex['lags'] = [5,15,30,50]
@@ -373,6 +316,9 @@ if ex['leave_n_out']:
                    'hspace' : 0.02, 'wspace' : 0.08,
                    'ax_text': ax_text } )
     func_CPPA.plotting_wrapper(pers_patt, ex, filename, kwrgs=kwrgs)
+
+
+
 #%% Weighing features if there are extracted every run (training set)
 # weighted by persistence of pattern over
 if ex['leave_n_out']:
@@ -397,6 +343,60 @@ if ex['leave_n_out']:
 #                       'cmap' : plt.cm.RdBu_r, 'column' : 2} )
         func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
+
+
+
+#%% Robustness of training precursor regions
+
+subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
+total_folder = os.path.join(ex['figpathbase'], subfolder)
+if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
+years = range(ex['startyear'], ex['endyear'])
+
+#n_land = np.sum(np.array(np.isnan(Prec_reg.values[0]),dtype=int) )
+#n_sea = Prec_reg[0].size - n_land
+if ex['method'] == 'iter':
+    test_set_to_plot = [1990, 2000, 2010, 2012, 2015]
+elif ex['method'][:6] == 'random':
+    test_set_to_plot = [set(t[1]['RV'].time.dt.year.values) for t in ex['train_test_list'][::5]]
+#test_set_to_plot = list(np.arange(0,ex['n_conv'],5))
+for yr in test_set_to_plot: 
+    n = test_set_to_plot.index(yr)
+    Robustness_weights = l_ds_CPPA[n]['weights'].sel(lag=ex['lags'])
+    size_trainset = ex['n_yrs'] - ex['leave_n_years_out']
+    Robustness_weights.attrs['title'] = ('Robustness\n test yr(s): {}, single '
+                            'training set (n={} yrs)'.format(yr,size_trainset))
+    Robustness_weights.attrs['units'] = 'Weights [{} ... 1]'.format(ex['comp_perc'])
+    filename = os.path.join(subfolder, Robustness_weights.attrs['title'].replace(
+                            ' ','_')+'.png')
+    for_plt = Robustness_weights.where(Robustness_weights.values != 0).copy()
+#    n_pattern = Prec_reg[0].size - np.sum(np.array(np.isnan(for_plt[0]),dtype=int))
+    
+    if ex['n_conv'] == 1:
+        steps = 19
+    else:
+        steps = 11
+    kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
+                   'steps' : 11, 'subtitles': ROC_str_Sem, 
+                   'vmin' : ex['comp_perc'], 'vmax' : for_plt.max().values+1E-9, 
+                   'cmap' : plt.cm.viridis_r, 'column' : 2,
+                   'cbar_vert' : 0.05, 'cbar_hght' : 0.01,
+                   'adj_fig_h' : 1.25, 'adj_fig_w' : 1., 
+                   'hspace' : 0.02, 'wspace' : 0.08} )
+    
+    func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
+    
+#%%
+
+filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
+dicRV = np.load(filename,  encoding='latin1').item()
+folder = os.path.join(ex['figpathbase'], ex['exp_folder'])
+xarray_plot(dicRV['mask'], path=folder, name='RV_mask', saving=True)
+    
+func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=True)
+## plotting same figure as in paper
+#for i in range(2005, 2010):
+#    func_CPPA.plot_oneyr_events(RV_ts, ex, i, folder, saving=True)
 
 #%% Plotting prediciton time series vs truth:
 yrs_to_plot = [1985, 1990, 1995, 2004, 2007, 2012, 2015]

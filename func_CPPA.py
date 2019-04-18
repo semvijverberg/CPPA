@@ -192,10 +192,13 @@ def extract_precursor(Prec_reg, train, test, ex):
     weights.name = 'weights'
    
 
-    RV_event_train, dur = Ev_timeseries(train['RV'], ex['event_thres'], ex)
+    RV_event_train = Ev_timeseries(train['RV'], ex['event_thres'], ex)[0]
     RV_event_train = pd.to_datetime(RV_event_train.time.values)
 
     RV_dates_train = pd.to_datetime(train['RV'].time.values)
+    all_yrs_set = list(set(RV_dates_train.year.values))
+    comp_years = list(RV_event_train.year.values)
+    mask_chunks = get_chunks(all_yrs_set, comp_years)
     #%%
     for lag in ex['lags']:
 
@@ -212,12 +215,12 @@ def extract_precursor(Prec_reg, train, test, ex):
         
         
         
-        wghts_dur = np.sqrt(dur)
+
         
         #%%
         # extract precursor regions composite approach
-        composite_p1, xrnpmap_p1, wghts_at_lag = extract_regs_p1(events_min_lag, wghts_dur,
-                                             Prec_train, dates_train_min_lag, std_train_lag, ex)  
+        composite_p1, xrnpmap_p1, wghts_at_lag = extract_regs_p1(Prec_train, mask_chunks, events_min_lag, 
+                                             dates_train_min_lag, std_train_lag, ex)  
 #        plt.figure()
 #        composite_p1.plot() 
 #        xrnpmap_p1.plot()
@@ -245,7 +248,30 @@ def extract_precursor(Prec_reg, train, test, ex):
 # =============================================================================
 # =============================================================================
 
-def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, std_train_lag, ex):
+def get_chunks(all_yrs_set, comp_years):
+
+    n_yrs = len(all_yrs_set)
+    perc_yrs_out = [5, 10, 12.5, 15, 20]
+    years_n_out = list(set([int(np.round(n_yrs*p/100., decimals=0)) for p in perc_yrs_out]))
+    chunks = []
+    for n_out in years_n_out:    
+        chunks, count = create_chunks(all_yrs_set, n_out, chunks)
+    
+    mask_chunk = np.zeros( (len(chunks), len(comp_years)) , dtype=bool)
+    for n, chnk in enumerate(chunks):
+        mask_true_idx = [i for i in range(len(comp_years)) if comp_years[i] not in chnk] 
+        mask_chunk[n][mask_true_idx] = True
+        
+    count = np.zeros( (len(all_yrs_set)) )
+    for yr in all_yrs_set:
+        idx = all_yrs_set.index(yr)
+        count[idx] = np.sum( [chnk.count(yr) for chnk in chunks] )
+        
+    return mask_chunk
+
+
+def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag, std_train_lag, ex):
+                                             
     #%% 
 #    T, pval, mask_sig = Welchs_t_test(sample, full, alpha=0.01)
 #    threshold = np.reshape( mask_sig, (mask_sig.size) )
@@ -255,30 +281,7 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
     # divide train set into train-feature and train-weights part:
 #    start = time.time()
     
-
-    all_yrs_set = list(set(Prec_train.time.dt.year.values))    
-    comp_years = list(events_min_lag.year.values)
-    n_yrs = len(all_yrs_set)
-
-    perc_yrs_out = [5, 10, 12.5, 15, 20]
-    years_n_out = [int(np.round(n_yrs*p/100., decimals=0)) for p in perc_yrs_out]
-    chunks = []
-    for n_out in years_n_out:    
-        chunks, count = create_chunks(all_yrs_set, n_out, chunks)
-    
-    mask_chunk = np.zeros( (len(chunks), len(comp_years)) , dtype=bool)
-    for n, chnk in enumerate(chunks):
-#        yrs = list(chunks[n])
-        mask_true_idx = [i for i in range(len(comp_years)) if comp_years[i] not in chnk] 
-        mask_chunk[n][mask_true_idx] = True
-        
-        
-    count = np.zeros( (len(all_yrs_set)) )
-    for yr in all_yrs_set:
-        idx = all_yrs_set.index(yr)
-        count[idx] = np.sum( [chnk.count(yr) for chnk in chunks] )
-
-    
+   
     
     lats = Prec_train.latitude
     lons = Prec_train.longitude    
@@ -320,26 +323,28 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
         return iter_regions
 
     
-#%%
+
 
 
     jit_make_composites = numba.jit(nopython=True)(make_composites)
     
-    iter_regions = np.zeros( (comp_train_stack.shape[0]*len(mask_chunk), comp_train_stack[0,0].size), dtype='int8')
-    iter_regions = jit_make_composites(mask_chunk, comp_train_stack, iter_regions)
+    iter_regions = np.zeros( (comp_train_stack.shape[0]*len(mask_chunks), comp_train_stack[0,0].size), dtype='int8')
+    iter_regions = jit_make_composites(mask_chunks, comp_train_stack, iter_regions)
     
 
 
-#    iter_regions = make_composites(mask_chunk, comp_train_stack, iter_regions)
-#    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(iter_regions_in, axis=0), (lats.size, lons.size))) ; plt.colorbar()
+#    iter_regions = make_composites(mask_chunks, comp_train_stack, iter_regions)
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(iter_regions, axis=0), (lats.size, lons.size))) ; plt.colorbar()
-    #%%
-    mask_final = ( np.sum(iter_regions, axis=0) < int(ex['comp_perc'] * iter_regions.shape[0]))
 
+    mask_final = ( np.sum(iter_regions, axis=0) < int(ex['comp_perc'] * iter_regions.shape[0]))
+#    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.array(mask_final, dtype=int), (lats.size, lons.size))) ; plt.colorbar()
     weights = np.sum(iter_regions, axis=0)
     weights[mask_final==True] = 0.
     sum_count = np.reshape(weights, (lats.size, lons.size))
     weights = sum_count / np.max(sum_count)
+    
+    
+    
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(weights, (lats.size, lons.size)))
     composite_p1 = Prec_train.sel(time=events_min_lag).mean(dim='time')
     nparray_comp = np.reshape(np.nan_to_num(composite_p1.values), (composite_p1.size))
@@ -375,7 +380,7 @@ def extract_regs_p1(events_min_lag, wghts_dur, Prec_train, dates_train_min_lag, 
 #    print( time.time() - start )
 
 #    plt.figure()
-    xrnpmap_init.plot.pcolormesh(cmap=plt.cm.tab10)   
+#    xrnpmap_init.plot.pcolormesh(cmap=plt.cm.tab10)   
 #    composite_p1.plot.contourf()  
 #    list_region_info = [Regions_lag_i, ts_regions_lag_i, sign_ts_regions, weights]
     #%%
@@ -558,8 +563,9 @@ def rand_traintest(RV_ts, Prec_reg, ex):
     
     # conditions failed initally assumed True
     a_conditions_failed = True
+    count = 0
     while a_conditions_failed == True:
-        
+        count +=1
         a_conditions_failed = False
         # Divide into random sampled 25 year for train & rest for test
     #        n_years_sampled = int((ex['endyear'] - ex['startyear']+1)*0.66)
@@ -570,7 +576,7 @@ def rand_traintest(RV_ts, Prec_reg, ex):
 
             ex['leave_n_years_out'] = size_test
             yrs_to_draw_sample = [yr for yr in all_years if yr not in flatten(ex['tested_yrs'])]
-            if (len(yrs_to_draw_sample) - size_test) > size_test:
+            if (len(yrs_to_draw_sample) - size_test) >= size_test:
                 rand_test_years = np.random.choice(yrs_to_draw_sample, ex['leave_n_years_out'], replace=False)
             # if last test sample will be too small for next iteration, add test yrs to current test yrs
             if (len(yrs_to_draw_sample) - size_test) < size_test:
@@ -628,13 +634,15 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         
         ave_events_pyr = (len(event_train) + len(event_test))/len(all_years)
         exp_events     = int(ave_events_pyr) * len(rand_test_years)
-        tolerance      = 0.4 * exp_events
+        tolerance      = 0.5 * exp_events
         diff           = abs(len(event_test) - exp_events)
         
         print('{}: test year is {}, with {} events'.format(ex['n'], test_years, len(event_test)))
         if diff > tolerance and ex['method'][:6] == 'random' and ex['n'] != ex['n_conv']-1: 
             print('not a representative sample, drawing new sample')
             a_conditions_failed = True
+        if count == 5:
+            a_conditions_failed = False
                    
     ex['tested_yrs'].append(rand_test_years)
     train = dict( {    'RV'             : RV_train,

@@ -49,11 +49,11 @@ print_ex = ['RV_name', 'name', 'max_break',
             'startperiod', 'endperiod', 'n_conv', 'leave_n_out',
             'n_oneyr', 'method', 'ROC_leave_n_out',
             'wghts_accross_lags', 
-            'perc_map', 'tfreq', 'lags', 'n_yrs', 
+            'tfreq', 'lags', 'n_yrs', 
             'rollingmean', 'event_percentile',
             'event_thres', 'perc_map', 'comp_perc', 'extra_wght_dur',
             'region', 'regionmcK',
-            'add_lsm', 'min_n_gc', 'prec_reg_max_d']
+            'add_lsm', 'min_perc_prec_area', 'prec_reg_max_d']
 def printset(print_ex=print_ex, ex=ex):
     max_key_len = max([len(i) for i in print_ex])
     for key in print_ex:

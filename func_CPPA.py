@@ -30,7 +30,10 @@ def main(RV_ts, Prec_reg, ex):
     if (ex['method'] == 'no_train_test_split') : ex['n_conv'] = 1
     if ex['method'][:5] == 'split' : ex['n_conv'] = 1
     if ex['method'][:6] == 'random' : ex['tested_yrs'] = []
-    if ex['method'][:6] == 'random' : ex['n_conv'] = int(ex['n_yrs'] / int(ex['method'][6:])) 
+    if ex['method'][:6] == 'random' : ex['n_conv'] = int(ex['n_yrs'] / int(ex['method'][6:]))
+    if ex['method'] == 'iter': ex['n_conv'] = ex['n_yrs'] 
+        
+    
     if ex['ROC_leave_n_out'] == True or ex['method'] == 'no_train_test_split': 
         print('leave_n_out set to False')
         ex['leave_n_out'] = False
@@ -85,11 +88,6 @@ def main(RV_ts, Prec_reg, ex):
         
     ex['train_test_list'] = train_test_list
     
-    if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
-        l_ds_CPPA = grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                         grouping = 'group_accros_tests_single_lag', eps=10)
-        
-    store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
     #%%
     return l_ds_CPPA, ex
 
@@ -118,6 +116,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
 
     elif ex['method']=='no_train_test_split':
         print('Training on all years')
+        ex['leave_n_years_out'] = 0
         Prec_train_idx = np.arange(0, Prec_reg.time.size) #range(len(full_years)) if full_years[i] in rand_train_years]
         train = dict( { 'Prec_train_idx' : Prec_train_idx,
                         'RV'    : RV_ts})
@@ -198,7 +197,7 @@ def extract_precursor(Prec_reg, train, test, ex):
     RV_dates_train = pd.to_datetime(train['RV'].time.values)
     all_yrs_set = list(set(RV_dates_train.year.values))
     comp_years = list(RV_event_train.year.values)
-    mask_chunks = get_chunks(all_yrs_set, comp_years)
+    mask_chunks = get_chunks(all_yrs_set, comp_years, ex)
     #%%
     for lag in ex['lags']:
 
@@ -248,10 +247,10 @@ def extract_precursor(Prec_reg, train, test, ex):
 # =============================================================================
 # =============================================================================
 
-def get_chunks(all_yrs_set, comp_years):
+def get_chunks(all_yrs_set, comp_years, ex):
 
     n_yrs = len(all_yrs_set)
-    perc_yrs_out = [5, 10, 12.5, 15, 20]
+    perc_yrs_out = ex['perc_yrs_out']
     years_n_out = list(set([int(np.round(n_yrs*p/100., decimals=0)) for p in perc_yrs_out]))
     chunks = []
     for n_out in years_n_out:    
@@ -286,7 +285,7 @@ def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag
     lats = Prec_train.latitude
     lons = Prec_train.longitude    
     lsm  = np.isnan(Prec_train[0])
-    days_before = [0, 2, 4]
+    days_before = ex['days_before']
     comp_train_stack = np.empty( (len(days_before), events_min_lag.size, lats.size* lons.size), dtype='int16')
     for i, d in enumerate(days_before):
         Prec_RV_train = Prec_train.sel(time=dates_train_min_lag - pd.Timedelta(d, 'd'))
@@ -559,6 +558,7 @@ def func_dates_min_lag(dates, lag):
 
 def rand_traintest(RV_ts, Prec_reg, ex):
     #%%
+    if ex['n'] == 0: ex['tested_yrs'] = []
     all_years = np.arange(ex['startyear'], ex['endyear']+1)
     
     # conditions failed initally assumed True
@@ -570,7 +570,7 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         # Divide into random sampled 25 year for train & rest for test
     #        n_years_sampled = int((ex['endyear'] - ex['startyear']+1)*0.66)
         if ex['method'][:6] == 'random':
-            if ex['n'] == 0: ex['tested_yrs'] = []
+            
             size_test  = int(ex['method'][6:])
             size_train = int(ex['n_yrs'] - size_test)
 
@@ -644,7 +644,8 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         if count == 5:
             a_conditions_failed = False
                    
-    ex['tested_yrs'].append(rand_test_years)
+    ex['tested_yrs'].append(test_years)
+    
     train = dict( {    'RV'             : RV_train,
                        'Prec_train_idx' : Prec_train_idx})
     test = dict( {     'RV'             : RV_test,

@@ -15,22 +15,42 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def ROC_score_wrapper_old(test, train, ds_mcK, ds_Sem, ex):
+def only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
+    #%%
+    ex['score'] = []
+    ex['test_ts_prec'] = np.zeros( len(ex['lags']) , dtype=list)
+    ex['test_RV'] = np.zeros( len(ex['lags']) , dtype=list)
+    for n in range(len(ex['train_test_list'])):
+        ex['n'] = n
+        
+        test =ex['train_test_list'][n][1]
+        ex['test_year'] = list(set(test['RV'].time.dt.year.values))
+        
+        
+        ds_Sem = l_ds_CPPA[n]
+        
+        
+        ex = ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex)
+    #%%
+    return ex
+
+def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
     #%%
     # =============================================================================
     # calc ROC scores
     # =============================================================================
     ROC_Sem  = np.zeros(len(ex['lags']))
-    ROC_mcK  = np.zeros(len(ex['lags']))
     ROC_boot = np.zeros(len(ex['lags']))
-    for lag in ex['lags']:
+    
+    for lag_idx, lag in enumerate(ex['lags']):
+        
         idx = ex['lags'].index(lag)
         dates_test = pd.to_datetime(test['RV'].time.values)
         # select antecedant SST pattern to summer days:
         dates_min_lag = dates_test - pd.Timedelta(int(lag), unit='d')
 
 
-        var_test_reg = test['Prec'].sel(time=dates_min_lag)        
+        var_test_reg = Prec_reg.sel(time=dates_min_lag)        
 
         if ex['use_ts_logit'] == False:
             # weight by robustness of precursors
@@ -38,7 +58,7 @@ def ROC_score_wrapper_old(test, train, ds_mcK, ds_Sem, ex):
             crosscorr_Sem = func_CPPA.cross_correlation_patterns(var_test_reg, 
                                                             ds_Sem['pattern_CPPA'].sel(lag=lag))
         elif ex['use_ts_logit'] == True:
-            crosscorr_Sem = ds_Sem['ts_prediction'][idx]
+            crosscorr_Sem = ds_Sem['ts_prediction'][lag_idx]
 #        if idx == 0:
 #            print(ex['test_years'])
 #            print(crosscorr_Sem.time)
@@ -48,119 +68,81 @@ def ROC_score_wrapper_old(test, train, ds_mcK, ds_Sem, ex):
             or ex['ROC_leave_n_out'] or ex['method'][:6] == 'random'
             ):
             if ex['n'] == 0:
-
-                ex['test_ts_Sem'][idx] = crosscorr_Sem.values
-                ex['test_RV'][idx]     = test['RV'].values
-                ex['test_yrs'][idx]    = test['RV'].time
-    #                ex['test_RV_Sem'][idx]  = test['RV'].values
+                ex['test_RV'][idx]          = test['RV'].values
+                ex['test_ts_prec'][lag_idx]  = crosscorr_Sem.values
             else:
-    #                update_ROCS = ex['test_ts_mcK'][idx].append(list(crosscorr_mcK.values))
-
-                ex['test_ts_Sem'][idx] = np.concatenate( [ex['test_ts_Sem'][idx], crosscorr_Sem.values] )
                 ex['test_RV'][idx]     = np.concatenate( [ex['test_RV'][idx], test['RV'].values] )  
-                ex['test_yrs'][idx]    = np.concatenate( [ex['test_yrs'][idx], test['RV'].time] )  
+                ex['test_ts_prec'][lag_idx] = np.concatenate( [ex['test_ts_prec'][lag_idx], crosscorr_Sem.values] )
                 
         
             if  ex['n'] == ex['n_conv']-1:
-                if idx == 0:
+                if lag_idx == 0:
                     print('Calculating ROC scores\nDatapoints precursor length '
-                      '{}\nDatapoints RV length {}'.format(len(ex['test_ts_mcK'][0]),
+                      '{}\nDatapoints RV length {}'.format(len(ex['test_ts_prec'][0]),
                        len(ex['test_RV'][0])))
                     
 
-                ts_pred_Sem  = ((ex['test_ts_Sem'][idx]-np.mean(ex['test_ts_Sem'][idx]))/ \
-                                          (np.std(ex['test_ts_Sem'][idx]) ) )                 
+                ts_pred_Sem  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
+                                          (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
 
-#                func_CPPA.plot_events_validation(ex['test_ts_Sem'][idx], ex['test_ts_mcK'][idx], test['RV'], Prec_threshold_Sem, 
-#                                            Prec_threshold_mcK, ex['event_thres'], 2000)
-                
+
+                if lag > 30:
+                    obs_array = pd.DataFrame(ex['test_RV'][0])
+                    obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
+                    threshold = (obs_array.mean() + obs_array.std()).values
+                    events_idx = np.where(obs_array > threshold)[0]
+                else:
+                    events_idx = np.where(ex['test_RV'][0] > ex['event_thres'])[0]
+                y_true = func_CPPA.Ev_binary(events_idx, len(ex['test_RV'][0]),  ex['min_dur'], 
+                                         ex['max_break'], grouped=False)
+                y_true[y_true!=0] = 1
+        
                 n_boot = 10
-                if ex['use_ts_logit'] == True:
-                    ROC_Sem[idx] = ROC_score(ts_pred_Sem, ex['test_RV'][idx],
-                                      ex['event_thres'], lag, 0, ex, 'default')[0]
-                elif ex['use_ts_logit'] == False:
-                    ROC_Sem[idx] = ROC_score(ex['test_ts_Sem'][idx], ex['test_RV'][idx],
-                                      ex['event_thres'], lag, 0, ex, 'default')[0]
+                if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == True:
+                    ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
+                                                   0, n_boot, ex['n_yrs'], 'default')[0]
+                else:
+                    ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
+                                                   0, 0, ex['n_yrs'], 'default')[0]
                 
-                print('\n*** AUC for {} lag {} ***\n\nMck {:.2f} \t Sem {:.2f} '
-                '\t ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-                  lag, ROC_mcK[idx], ROC_Sem[idx], 2*np.std(ROC_boot)))
+                print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
+                ' ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
+                  lag, ROC_Sem[idx], 2*np.std(ROC_boot)))
             
-                
-#        elif ex['leave_n_out'] == True and ex['method'] == 'random':        
-#                               
-#            # check detection of precursor:
-#            Prec_threshold_mcK = ds_mcK['perc'].sel(percentile=60 /10).values[0]
-#            Prec_threshold_Sem = ds_Sem['perc'].sel(percentile=60 /10).values[0]
-#            
-#            # check if there are any detections
-#            Prec_det_mcK = (func_CPPA.Ev_timeseries(crosscorr_mcK, 
-#                                           Prec_threshold_mcK).size > ex['min_detection'])
-#            Prec_det_Sem = (func_CPPA.Ev_timeseries(crosscorr_Sem, 
-#                                           Prec_threshold_Sem).size > ex['min_detection'])
-#            
-#    #        # plot the detections
-#            func_CPPA.plot_events_validation(crosscorr_Sem, crosscorr_mcK, test['RV'], Prec_threshold_Sem, 
-#                                            Prec_threshold_mcK, ex['event_thres'], 2000)
-#    
-#            if Prec_det_mcK == True:
-#                n_boot = 1
-#                ROC_mcK[idx], ROC_boot = ROC_score(crosscorr_mcK, test['RV'],
-#                                      ex['event_thres'], lag, n_boot, ex, ds_mcK['perc'])
-#            else:
-#                print('Not enough predictions detected, neglecting this predictions')
-#                ROC_mcK[idx] = ROC_boot = 0.5
-#    
-#    
-#            
-#            if Prec_det_Sem == True:
-#                n_boot = 0
-#                ROC_Sem[idx] = ROC_score(crosscorr_Sem, test['RV'],
-#                                      ex['event_thres'], lag, n_boot, ex, ds_Sem['perc'])[0]
-#            else:
-#                print('Not enough predictions detected, neglecting this predictions')
-#                ROC_Sem = ROC_boot = 0.5
-#                                  
-#            
-#            print('\n*** ROC score for {} lag {} ***\n\nMck {:.2f} \t Sem {:.2f} '
-#                '\t ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-#                  lag, ROC_mcK[idx], ROC_Sem[idx], 2*np.std(ROC_boot)))
             
         elif ex['leave_n_out'] == False or ex['method'][:5] == 'split':
             if idx == 0:
                 print('performing hindcast')
+
+            ex['test_RV'][lag_idx]          = test['RV'].values
+            ex['test_ts_prec'][lag_idx]  = crosscorr_Sem.values
+            ts_pred_Sem  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
+                                          (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
+            
+            if lag > 30:
+                obs_array = pd.DataFrame(ex['test_RV'][0])
+                obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
+                threshold = (obs_array.mean() + obs_array.std()).values
+                events_idx = np.where(obs_array > threshold)[0]
+            else:
+                events_idx = np.where(ex['test_RV'][0] > ex['event_thres'])[0]
+            y_true = func_CPPA.Ev_binary(events_idx, len(ex['test_RV'][0]),  ex['min_dur'], 
+                                     ex['max_break'], grouped=False)
+            y_true[y_true!=0] = 1
             n_boot = 5
-            ROC_Sem[idx] = ROC_score(crosscorr_Sem, test['RV'],
-                                      ex['event_thres'], lag, 0, ex, 'default')[0]
+            ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
+                                           0, 0, ex['n_yrs'], 'default')[0]
             
-#            Prec_threshold_Sem = np.percentile(crosscorr_Sem, 70)
-#            Prec_threshold_mcK = np.percentile(crosscorr_mcK, 70)
+
             
-            
-#            func_CPPA.plot_events_validation(crosscorr_Sem, crosscorr_mcK, test['RV'], Prec_threshold_Sem, 
-#                                            Prec_threshold_mcK, ex['event_thres'], 2000)
-            
-#            func_CPPA.plot_events_validation(crosscorr_Sem, crosscorr_mcK, test['RV'], 
-#                                            ds_Sem['perc'].sel(percentile=5)), 
-#                                            Prec_threshold_mcK, ex['event_thres'], 2000)
-            
-            print('\n*** ROC score for {} lag {} ***\n\nMck {:.2f} \t Sem {:.2f} '
-                '\t ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-                  lag, ROC_mcK[idx], ROC_Sem[idx], 2*np.std(ROC_boot)))
-    
-    #%%
-    # store output:
-#    ds_mcK['score'] = xr.DataArray(data=ROC_mcK, coords=[ex['lags']], 
-#                      dims=['lag'], name='score_diff_lags',
-#                      attrs={'units':'-'})
-#    ds_Sem['score'] = xr.DataArray(data=ROC_Sem, coords=[ex['lags']], 
-#                      dims=['lag'], name='score_diff_lags',
-#                      attrs={'units':'-'})
-    
-    # store mean values of prediciton time serie
+            print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
+            ' ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
+              lag, ROC_Sem[idx], 2*np.std(ROC_boot)))
+
         
-    test_year = list(set(test['RV'].time.dt.year.values))
-    ex['score_per_run'].append([test_year, len(test['events']), ROC_Sem, ROC_boot])
+
+    ex['score'].append([ ROC_Sem, ROC_boot])
+    #%%
     return ex
 
 
@@ -185,21 +167,21 @@ def ROC_score_wrapper(ex):
         y_true[y_true!=0] = 1
         if lag_idx == 0:
             print('Calculating ROC scores\nDatapoints precursor length '
-              '{}\nDatapoints RV length {}'.format(len(ex['test_ts_Sem'][0]),
+              '{}\nDatapoints RV length {}'.format(len(ex['test_ts_prec'][0]),
                len(ex['test_RV'][0])))
             
-        ts_pred_Sem  = ((ex['test_ts_Sem'][lag_idx]-np.mean(ex['test_ts_Sem'][lag_idx]))/ \
-                                  (np.std(ex['test_ts_Sem'][lag_idx]) ) )                 
+        ts_pred_Sem  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
+                                  (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
 
-#                func_CPPA.plot_events_validation(ex['test_ts_Sem'][idx], ex['test_ts_mcK'][idx], test['RV'], Prec_threshold_Sem, 
+#                func_CPPA.plot_events_validation(ex['test_ts_prec'][idx], ex['test_ts_mcK'][idx], test['RV'], Prec_threshold_Sem, 
 #                                            Prec_threshold_mcK, ex['event_thres'], 2000)
         
         n_boot = 10
 
-        if ex['use_ts_logit'] == True:
+        if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == True:
             ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
                                            0, n_boot, ex['n_yrs'], 'default')[0]
-        elif ex['use_ts_logit'] == False:
+        else:
             ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
                                            0, 0, ex['n_yrs'], 'default')[0]
         
@@ -401,11 +383,11 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         idx = ex['lags'].index(lag)
         # normalize
      
-        ts_pred_Sem  = ((ex['test_ts_Sem'][idx]-np.mean(ex['test_ts_Sem'][idx]))/ \
-                                  (np.std(ex['test_ts_Sem'][idx]) ) )
+        ts_pred_Sem  = ((ex['test_ts_prec'][idx]-np.mean(ex['test_ts_prec'][idx]))/ \
+                                  (np.std(ex['test_ts_prec'][idx]) ) )
         norm_test_RV = ((ex['test_RV'][idx]-np.mean(ex['test_RV'][idx]))/ \
                                   (np.std(ex['test_RV'][idx]) ) ) 
-        labels       = pd.to_datetime(ex['test_yrs'][0])
+        labels       = pd.to_datetime(ex['dates_RV'])
             
         
         threshold = np.std(norm_test_RV)
@@ -539,9 +521,9 @@ def plotting_timeseries(test, yrs_to_plot, ex):
 #                                          np.std(ex['test_ts'][idx]))            
 #                
 ##                Prec_threshold_mcK = np.percentile(ex['test_ts_mcK'][idx], 70)
-##                Prec_threshold_Sem = np.percentile(ex['test_ts_Sem'][idx], 70)
+##                Prec_threshold_Sem = np.percentile(ex['test_ts_prec'][idx], 70)
 ##
-##                func_CPPA.plot_events_validation(ex['test_ts_Sem'][idx], ex['test_ts_mcK'][idx], test['RV'], Prec_threshold_Sem, 
+##                func_CPPA.plot_events_validation(ex['test_ts_prec'][idx], ex['test_ts_mcK'][idx], test['RV'], Prec_threshold_Sem, 
 ##                                            Prec_threshold_mcK, ex['event_thres'], 2000)
 #                
 #                n_boot = 10

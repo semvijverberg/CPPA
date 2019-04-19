@@ -27,15 +27,17 @@ def load_data(ex):
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
     dicRV = np.load(filename,  encoding='latin1').item()
     RVtsfull = dicRV['RVfullts95']
-    ex['mask'] = dicRV['mask']
-    func_CPPA.xarray_plot(dicRV['mask'])
+    if ex['datafolder'] == 'ERAint':
+        ex['mask'] = dicRV['RV_array']['mask']
+    else:
+        ex['mask'] = dicRV['mask']
+    func_CPPA.xarray_plot(ex['mask'])
     RVhour   = RVtsfull.time[0].dt.hour.values
     datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
                                     ex['startyear'], ex['endyear'])
+    ex['dates_RV'] = datesRV
     # add RVhour to daily dates
     datesRV = datesRV + pd.Timedelta(int(RVhour), unit='h')
-    filename_precur = '{}_1979-2017_1jan_31dec_daily_{}deg.nc'.format(ex['name'],
-                       ex['grid_res'])
     ex['endyear'] = int(datesRV[-1].year)
     
     # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
@@ -84,7 +86,7 @@ def load_data(ex):
 
 
     ex['n_yrs'] = len(set(RV_ts.time.dt.year.values))
-    ex['n_conv'] = ex['n_yrs'] 
+    
     #%%
     return RV_ts, Prec_reg, ex
 

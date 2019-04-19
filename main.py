@@ -20,35 +20,36 @@ if sys.version[:1] == '3':
 import numpy as np
 import xarray as xr 
 import pandas as pd
-#import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-#import scipy
 import func_CPPA
 import func_pred
 import load_data
-
+from ROC_score import ROC_score_wrapper
+from ROC_score import only_spatcov_wrapper
 from ROC_score import plotting_timeseries
+
 xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
 
-
-path_pp  = os.path.join(basepath, 'Data_era5/input_pp') # path to netcdfs
+datafolder = 'ERAint'
+path_pp  = os.path.join(basepath, 'Data_'+datafolder +'/input_pp') # path to netcdfs
 if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 
 
 # =============================================================================
 # General Settings
 # =============================================================================
-ex = {'grid_res'    :       1.0,
+ex = {'datafolder'  :       datafolder,
+      'grid_res'    :       2.5,
      'startyear'    :       1979,
-     'endyear'      :       2018,
+     'endyear'      :       2017,
      'path_pp'      :       path_pp,
      'startperiod'   :       '06-24', #'1982-06-24',
      'endperiod'     :       '08-22', #'1982-08-22',
      'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
      'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-     'RVts_filename':       "t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1.npy",
+     'RVts_filename':       datafolder+"_t2mmax_1979-2017_averAggljacc0.75d_tf1_n4__to_t2mmax_tf1.npy",
      'RV_name'      :       'T2mmax',
      'name'         :       'sst',
      'add_lsm'      :       False,
@@ -59,34 +60,37 @@ ex = {'grid_res'    :       1.0,
 # =============================================================================
 # Settings for event timeseries
 # =============================================================================
-ex['tfreq']             =       1
+ex['tfreq']             =       1 
 ex['max_break']         =       0   
 ex['min_dur']           =       1
 ex['event_percentile']  =       'std'    
 # =============================================================================
 # Settins for precursor / CPPA
 # =============================================================================
-ex['filename_precur']   =       '{}_1979-2018_1jan_31dec_daily_{}deg.nc'.format(
-                                ex['name'], ex['grid_res'])
+ex['filename_precur']   =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
+                                ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
 ex['rollingmean']       =       ('CPPA', 1)
 ex['extra_wght_dur']    =       False
 ex['prec_reg_max_d']    =       1
 ex['perc_map']          =       95
-ex['comp_perc']         =       0.8
-ex['min_perc_prec_area']=       0.002 # min size region - in % of total prec area [m2]
+ex['comp_perc']         =       0.85
+ex['min_perc_prec_area']=       0.01 # min size region - in % of total prec area [m2]
 ex['wghts_accross_lags']=       False
+ex['perc_yrs_out']      =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
+ex['days_before']       =       [0, 4, 8]
+ex['store_timeseries']  =       False
 # =============================================================================
 # Settings for validation     
 # =============================================================================
 ex['leave_n_out']       =       True
 ex['ROC_leave_n_out']   =       False
-ex['method']            =       'random3' #'iter' or 'no_train_test_split' or split#8 or random3  
+ex['method']            =       'no_train_test_split' #'iter' or 'no_train_test_split' or split#8 or random3  
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
 RV_ts, Prec_reg, ex = load_data.load_data(ex)
 
-ex['exppathbase'] = '{}_{}_{}'.format(ex['RV_name'],ex['name'],
+ex['exppathbase'] = '{}_{}_{}_{}'.format(datafolder, ex['RV_name'],ex['name'],
                       ex['region'])
 ex['figpathbase'] = os.path.join(ex['figpathbase'], ex['exppathbase'])
 if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
@@ -94,14 +98,15 @@ if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
 
 print_ex = ['RV_name', 'name', 'max_break',
             'min_dur', 'grid_res', 'startyear', 'endyear', 
-            'startperiod', 'endperiod', 'n_conv', 'leave_n_out',
+            'startperiod', 'endperiod', 'leave_n_out',
             'n_oneyr', 'method', 'ROC_leave_n_out',
-            'wghts_accross_lags', 
+            'wghts_accross_lags', 'perc_yrs_out', 'days_before',
             'perc_map', 'tfreq', 'lags', 'n_yrs', 
             'rollingmean', 'event_percentile',
             'event_thres', 'perc_map', 'comp_perc', 'extra_wght_dur',
             'region', 
-            'add_lsm', 'min_perc_prec_area', 'prec_reg_max_d']
+            'add_lsm', 'min_perc_prec_area', 'prec_reg_max_d', 
+            'path_pp']
 
 def printset(print_ex=print_ex, ex=ex):
     max_key_len = max([len(i) for i in print_ex])
@@ -157,15 +162,22 @@ with open(txtfile, "w") as text_file:
         expand = max_key_len - key_len
         key_exp = key + ' ' * expand
         printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
-        print(printline)
         print(printline, file=text_file)
 
 
 
 
 #%%
-args = ['python output_wrapper.py {}'.format(output_dic_folder)]
-func_CPPA.kornshell_with_input(args, ex)
+if ex['store_timeseries'] == True:
+    if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
+        l_ds_CPPA = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
+                         grouping = 'group_accros_tests_single_lag', eps=10)
+        
+    func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+    ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
+    ex = ROC_score_wrapper(ex)
+    args = ['python output_wrapper.py {}'.format(output_dic_folder)]
+    func_CPPA.kornshell_with_input(args, ex)
 
 
 #%% Generate output in console
@@ -206,12 +218,28 @@ with open(txtfile, "w") as text_file:
 # perform prediciton        
 # =============================================================================
 
-
-#ex, l_ds_CPPA = func_pred.make_prediction(l_ds_CPPA, l_ds_PEP, Prec_reg, ex)
-from ROC_score import ROC_score_wrapper
+# write output in textfile
+if 'use_ts_logit' in ex.keys():
+    if ex['use_ts_logit'] == True:
+        predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
+else:
+    ex['use_ts_logit'] = False
+    predict_folder = 'spatcov_CPPA'
 ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
-ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
-ex = ROC_score_wrapper(ex)
+if ex['store_timeseries'] == True:
+    
+    if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
+        l_ds_CPPA = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
+                         grouping = 'group_accros_tests_single_lag', eps=10)
+        key_pattern_num = 'pat_num_CPPA_clust'
+    else:
+        key_pattern_num = 'pat_num_CPPA'
+    func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+    ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
+    ex = ROC_score_wrapper(ex)
+else:
+    key_pattern_num = 'pat_num_CPPA'
+    ex = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
 
 
 #%%
@@ -229,10 +257,6 @@ patterns_Sem = xr.DataArray(data=array, coords=[range(len(l_ds_CPPA)), ex['lags'
 
 
 for n in range(len(ex['train_test_list'])):
-#    ex['n'] = n
-#    if ex['use_ts_logit'] == True:
-#        name_for_ts = 'logit'
-#    elif ex['use_ts_logit'] == False:
     name_for_ts = 'CPPA'
         
     if (ex['method'][:6] == 'random'):
@@ -240,7 +264,6 @@ for n in range(len(ex['train_test_list'])):
             # remove empty n_tests
             patterns_Sem = patterns_Sem.sel(n_tests=slice(0,len(l_ds_CPPA)))
 
-#            ex['n_conv'] = ex['n_stop']
     
     upd_pattern = l_ds_CPPA[n]['pattern_' + name_for_ts].sel(lag=ex['lags'])
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
@@ -390,7 +413,7 @@ for yr in test_set_to_plot:
 filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
 dicRV = np.load(filename,  encoding='latin1').item()
 folder = os.path.join(ex['figpathbase'], ex['exp_folder'])
-xarray_plot(dicRV['mask'], path=folder, name='RV_mask', saving=True)
+xarray_plot(ex['mask'], path=folder, name='RV_mask', saving=True)
     
 func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=True)
 ## plotting same figure as in paper
@@ -407,7 +430,6 @@ plotting_timeseries(test, yrs_to_plot, ex)
 #%% Initial regions from only composite extraction:
 
 lags = ex['lags']
-lags = [5] #5,15,30,50]
 if ex['leave_n_out']:
     subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
     total_folder = os.path.join(ex['figpathbase'], subfolder)
@@ -415,7 +437,7 @@ if ex['leave_n_out']:
     years = range(ex['startyear'], ex['endyear'])
     for n in np.arange(0, ex['n_conv'], 3, dtype=int): 
         yr = years[n]
-        pattern_num_init = l_ds_CPPA[n]['pat_num_CPPA_clust'].sel(lag=lags)
+        pattern_num_init = l_ds_CPPA[n][key_pattern_num].sel(lag=lags)
         ROC_str_Sem_ = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
         
 

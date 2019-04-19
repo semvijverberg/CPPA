@@ -46,14 +46,15 @@ RV_ts, Prec_reg, ex = load_data.load_data(ex)
 
 print_ex = ['RV_name', 'name', 'max_break',
             'min_dur', 'grid_res', 'startyear', 'endyear', 
-            'startperiod', 'endperiod', 'n_conv', 'leave_n_out',
+            'startperiod', 'endperiod', 'leave_n_out',
             'n_oneyr', 'method', 'ROC_leave_n_out',
-            'wghts_accross_lags', 
-            'tfreq', 'lags', 'n_yrs', 
+            'wghts_accross_lags', 'n_conv',
+            'perc_map', 'tfreq', 'lags', 'n_yrs', 
             'rollingmean', 'event_percentile',
             'event_thres', 'perc_map', 'comp_perc', 'extra_wght_dur',
-            'region', 'regionmcK',
+            'region', 
             'add_lsm', 'min_perc_prec_area', 'prec_reg_max_d']
+
 def printset(print_ex=print_ex, ex=ex):
     max_key_len = max([len(i) for i in print_ex])
     for key in print_ex:
@@ -206,10 +207,10 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
             name_for_ts = 'CPPA'
             
         if (ex['method'][:6] == 'random'):
-            if n == ex['n_stop']:
+            if n == ex['n_conv']:
                 # remove empty n_tests
-                patterns_Sem = patterns_Sem.sel(n_tests=slice(0,ex['n_stop']))
-                ex['n_conv'] = ex['n_stop']
+                patterns_Sem = patterns_Sem.sel(n_tests=slice(0,ex['n_conv']))
+           
         
         upd_pattern = l_ds_CPPA[n]['pattern_' + name_for_ts].sel(lag=ex['lags'])
         patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag'].sel(lag=ex['lags'])
@@ -373,17 +374,10 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
     #                       'cmap' : plt.cm.RdBu_r, 'column' : 2} )
             func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
     
-    
-    #%% Plotting prediciton time series vs truth:
-    yrs_to_plot = [1985, 1990, 1995, 2004, 2007, 2012, 2015]
-    #yrs_to_plot = list(np.arange(ex['startyear'],ex['endyear']+1))
-    test = ex['train_test_list'][0][1]        
-    plotting_timeseries(test, yrs_to_plot, ex) 
-    
+
     
     #%% Initial regions from only composite extraction:
-    
-
+    lags = ex['lags']
     if ex['leave_n_out']:
         subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
         total_folder = os.path.join(ex['figpathbase'], subfolder)
@@ -428,6 +422,14 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
                                'cmap' : plt.cm.tab20, 'column' : 2} )
                 
                 func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
+
+    
+    #%% Plotting prediciton time series vs truth:
+    yrs_to_plot = [1985, 1990, 1995, 2004, 2007, 2012, 2015]
+    #yrs_to_plot = list(np.arange(ex['startyear'],ex['endyear']+1))
+    test = ex['train_test_list'][0][1]        
+    plotting_timeseries(test, yrs_to_plot, ex) 
+    
 
 #%%
 if __name__ == '__main__':    

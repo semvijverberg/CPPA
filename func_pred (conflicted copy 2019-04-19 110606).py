@@ -34,8 +34,8 @@ def spatial_cov(ex, key1='spatcov_CPPA'):
         
         test = ex['train_test_list'][n][1]
         ex['test_year'] = list(set(test['RV'].time.dt.year.values))
-        if 'use_ts_logit' not in ex.keys() or ex['use_ts_logit'] == False:
-            print('test year(s) {}'.format(ex['test_year']))
+#        if ex['use_ts_logit'] == False:
+        print('test year(s) {}'.format(ex['test_year']))
                                  
         
         # get RV dates (period analyzed)

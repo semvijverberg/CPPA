@@ -40,7 +40,14 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
     # calc ROC scores
     # =============================================================================
     ROC_Sem  = np.zeros(len(ex['lags']))
-    ROC_boot = np.zeros(len(ex['lags']))
+    FP_TP    = np.zeros(len(ex['lags']), dtype=list)
+    ROC_boot = np.zeros(len(ex['lags']), dtype=list)
+    
+    if 'n_boot' not in ex.keys():
+        n_boot = 0
+    else:
+        n_boot = ex['n_boot']
+    
     
     for lag_idx, lag in enumerate(ex['lags']):
         
@@ -82,7 +89,7 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
                        len(ex['test_RV'][0])))
                     
 
-                ts_pred_Sem  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
+                ts_pred  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
                                           (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
 
 
@@ -97,17 +104,20 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
                                          ex['max_break'], grouped=False)
                 y_true[y_true!=0] = 1
         
-                n_boot = 10
+                
                 if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == True:
-                    ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
-                                                   0, n_boot, ex['n_yrs'], 'default')[0]
+                    ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
+                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
                 else:
-                    ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
-                                                   0, 0, ex['n_yrs'], 'default')[0]
+                    ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
+                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
+                
+                FP_TP[lag_idx] = FP, TP 
                 
                 print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
                 ' ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-                  lag, ROC_Sem[idx], 2*np.std(ROC_boot)))
+                  lag, ROC_Sem[idx], np.percentile(ROC_boot[lag_idx], 99)))
+                
             
             
         elif ex['leave_n_out'] == False or ex['method'][:5] == 'split':
@@ -116,7 +126,7 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
 
             ex['test_RV'][lag_idx]          = test['RV'].values
             ex['test_ts_prec'][lag_idx]  = crosscorr_Sem.values
-            ts_pred_Sem  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
+            ts_pred = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
                                           (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
             
             if lag > 30:
@@ -129,19 +139,23 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
             y_true = func_CPPA.Ev_binary(events_idx, len(ex['test_RV'][0]),  ex['min_dur'], 
                                      ex['max_break'], grouped=False)
             y_true[y_true!=0] = 1
-            n_boot = 5
-            ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
-                                           0, 0, ex['n_yrs'], 'default')[0]
+
+            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
+                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
             
 
+            FP_TP[lag_idx] = FP, TP 
             
             print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
             ' ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-              lag, ROC_Sem[idx], 2*np.std(ROC_boot)))
-
+              lag, ROC_Sem[idx], np.percentile(ROC_boot[lag_idx], 99)))
         
 
-    ex['score'].append([ ROC_Sem, ROC_boot])
+        
+#    scores_lags = [i[0] for i in ROC_Sem]
+#    FP_TP_rate  = [i[1:] for i in ROC_Sem]
+    
+    ex['score'].append([ ROC_Sem, ROC_boot, FP_TP])
     #%%
     return ex
 
@@ -149,9 +163,14 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
 def ROC_score_wrapper(ex):
     #%%
     ex['score'] = []
+    FP_TP    = np.zeros(len(ex['lags']), dtype=list)
     ROC_Sem  = np.zeros(len(ex['lags']))
     ROC_boot = np.zeros(len(ex['lags']))
-    
+
+    if 'n_boot' not in ex.keys():
+        n_boot = 0
+    else:
+        n_boot = ex['n_boot']
 
     
     for lag_idx, lag in enumerate(ex['lags']):
@@ -170,32 +189,32 @@ def ROC_score_wrapper(ex):
               '{}\nDatapoints RV length {}'.format(len(ex['test_ts_prec'][0]),
                len(ex['test_RV'][0])))
             
-        ts_pred_Sem  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
+        ts_pred  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
                                   (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
 
 #                func_CPPA.plot_events_validation(ex['test_ts_prec'][idx], ex['test_ts_mcK'][idx], test['RV'], Prec_threshold_Sem, 
 #                                            Prec_threshold_mcK, ex['event_thres'], 2000)
         
-        n_boot = 10
-
+        
         if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == True:
-            ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
-                                           0, n_boot, ex['n_yrs'], 'default')[0]
+            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
+                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
         else:
-            ROC_Sem[lag_idx] = ROC_score(ts_pred_Sem, y_true,
-                                           0, 0, ex['n_yrs'], 'default')[0]
+            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
+                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
+        
+        FP_TP[lag_idx] = FP, TP 
         
         print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
         ' ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-          lag, ROC_Sem[lag_idx], 2*np.std(ROC_boot)))
+          lag, ROC_Sem[lag_idx], np.percentile(ROC_boot[lag_idx], 99)))
         
-        
-    ex['score'].append([ROC_Sem, ROC_boot])
+    ex['score'].append([ROC_Sem, ROC_boot, FP_TP])
     #%%
     return ex
 
 
-def ROC_score(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='default'):
+def ROC_score(predictions, obs_binary, n_boot=0, win=0, n_yrs=39, thr_pred='default'):
     #%%
 #    win = 7
 #    predictions = pred
@@ -213,7 +232,7 @@ def ROC_score(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='defaul
     FP_rate =  np.ones((11))
     TP_rate[10] = 0
     FP_rate[10] = 0
-    AUC_new = np.zeros((n_boot))
+    
     
     #print(fixed_event_threshold) 
     events = np.where(obs_binary > 0.5)[0][:]  
@@ -284,12 +303,23 @@ def ROC_score(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='defaul
         FP_rate[p] = False_pos_rate
         TP_rate[p] = True_pos_rate
         
-     
-    ROC_score = np.abs(np.trapz(TP_rate, x=FP_rate ))
-#    print(ROC_score)
-#    print(True_pos, False_neg, False_pos, True_neg)
-    # shuffled ROC
+    if n_boot != 0:
+        ROC_boot = ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='default')
+    else:
+        ROC_boot = 0
+        
+    AUC_score = np.abs(np.trapz(TP_rate, x=FP_rate ))
+    
+    return AUC_score, FP_rate, TP_rate, ROC_boot
+
     #%%
+
+def ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='default'):
+    
+    obs_binary = np.copy(obs_binary)
+    AUC_new = np.zeros((n_boot))
+    
+    
     ROC_bootstrap = 0
     for j in range(n_boot):
         
@@ -367,10 +397,10 @@ def ROC_score(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='defaul
         AUC_score  = np.abs(np.trapz(TP_rate, FP_rate))
         AUC_new[j] = AUC_score
         AUC_new    = np.sort(AUC_new[:])[::-1]
-        pval       = (np.asarray(np.where(AUC_new > ROC_score)).size)/ n_boot
+#        pval       = (np.asarray(np.where(AUC_new > ROC_score)).size)/ n_boot
         ROC_bootstrap = AUC_new 
     #%%
-    return ROC_score, ROC_bootstrap
+    return ROC_bootstrap
 
 # =============================================================================
 # =============================================================================
@@ -390,7 +420,13 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         labels       = pd.to_datetime(ex['dates_RV'])
             
         
-        threshold = np.std(norm_test_RV)
+#        threshold = np.std(norm_test_RV)
+        if ex['event_percentile'] == 'std':
+            # binary time serie when T95 exceeds 1 std
+            threshold = np.std(norm_test_RV) 
+        else:
+            percentile = ex['event_percentile']
+            threshold= np.percentile(norm_test_RV, percentile)
         
         No_train_yrs = ex['n_yrs'] - int(test['RV'].size / ex['n_oneyr'])
         title = ('Prediction time series versus truth (lag={}), '
@@ -528,7 +564,7 @@ def plotting_timeseries(test, yrs_to_plot, ex):
 #                
 #                n_boot = 10
 #                ROC[idx], ROC_boot = ROC_score(ex['test_ts_mcK'][idx], ex['test_RV'][idx],
-#                                      ex['event_thres'], lag, n_boot, ex, 'default')
+#                                      ex['event_thres'], lag, n_boot, ex)
 #
 #                
 ##                print('\n*** ROC score for {} lag {} ***\n\nMck {:.2f} \t Sem {:.2f} '
@@ -566,7 +602,7 @@ def plotting_timeseries(test, yrs_to_plot, ex):
 #                print('performing hindcast')
 #            n_boot = 5
 #            ROC[idx], ROC_boot = ROC_score(pred_ts, test['RV'],
-#                                   ex['event_thres'], lag, n_boot, ex, 'default')
+#                                   ex['event_thres'], lag, n_boot, ex)
 #
 #            
 ##            Prec_threshold_Sem = np.percentile(pred_ts, 70)

@@ -9,12 +9,8 @@ import os, sys
 
 if os.path.isdir("/Users/semvijverberg/surfdrive/"):
     basepath = "/Users/semvijverberg/surfdrive/"
-    data_base_path = basepath
 else:
     basepath = "/home/semvij/"
-    data_base_path = "/p/projects/gotham/semvij/"
-
-
 os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
 sys.path.append(script_dir)
@@ -36,8 +32,8 @@ xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
 
-datafolder = 'era5'
-path_pp  = os.path.join(data_base_path, 'Data_'+datafolder +'/input_pp') # path to netcdfs
+datafolder = 'NOAA'
+path_pp  = os.path.join(basepath, 'Data_'+datafolder +'/input_pp') # path to netcdfs
 if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 
 
@@ -46,16 +42,16 @@ if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 # =============================================================================
 ex = {'datafolder'  :       datafolder,
       'grid_res'    :       1.0,
-     'startyear'    :       1979,
-     'endyear'      :       2018,
+     'startyear'    :       1982,
+     'endyear'      :       2017,
      'path_pp'      :       path_pp,
      'startperiod'  :       '06-24', #'1982-06-24',
      'endperiod'    :       '08-22', #'1982-08-22',
      'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
      'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-     'RVts_filename':       datafolder+"_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1.npy",
-     'RV_name'      :       't2mmax',
-     'name'         :       'sst',
+     'RVts_filename':       'T95_Bram_mcK.npy',
+     'RV_name'      :       'T95',
+     'name'         :       'sst_NOAA',
      'add_lsm'      :       False,
      'region'       :       'Northern',
      'lags'         :       [0, 15, 30, 50], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
@@ -64,32 +60,31 @@ ex = {'datafolder'  :       datafolder,
 # =============================================================================
 # Settings for event timeseries
 # =============================================================================
-ex['tfreq']                 =       1 
-ex['max_break']             =       0   
-ex['min_dur']               =       1
-ex['event_percentile']      =       'std'    
+ex['tfreq']             =       1 
+ex['max_break']         =       0   
+ex['min_dur']           =       1
+ex['event_percentile']  =       'std'    
 # =============================================================================
 # Settins for precursor / CPPA
 # =============================================================================
-ex['filename_precur']       =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
-                                    ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
-ex['SCM_percentile_thres']  =       95
-ex['FCP_thres']             =       0.85
-ex['min_perc_area']    =       0.02 # min size region - in % of total prec area [m2]
-ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
-ex['days_before']           =       [0, 4, 8]
-ex['rollingmean']           =       ('CPPA', 1)
-ex['extra_wght_dur']        =       False
-ex['prec_reg_max_d']        =       1
-ex['wghts_accross_lags']    =       False
-ex['store_timeseries']      =       False
+ex['filename_precur']   =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
+                                ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
+ex['rollingmean']       =       ('CPPA', 1)
+ex['extra_wght_dur']    =       False
+ex['prec_reg_max_d']    =       1
+ex['SCM_percentile_thres']          =       95
+ex['FCP_thres']         =       0.85
+ex['min_perc_area']=       0.02 # min size region - in % of total prec area [m2]
+ex['wghts_accross_lags']=       False
+ex['perc_yrs_out']      =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
+ex['days_before']       =       [0, 4, 8]
+ex['store_timeseries']  =       False
 # =============================================================================
 # Settings for validation     
 # =============================================================================
-ex['leave_n_out']           =       True
-ex['ROC_leave_n_out']       =       False
-ex['method']                =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
-ex['n_boot']                =       1000
+ex['leave_n_out']       =       True
+ex['ROC_leave_n_out']   =       False
+ex['method']            =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
@@ -102,16 +97,15 @@ if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
 
 
 print_ex = ['RV_name', 'name', 'max_break',
-            'min_dur', 'event_percentile',
-            'event_thres', 'extra_wght_dur',
-            'grid_res', 'startyear', 'endyear', 
+            'min_dur', 'grid_res', 'startyear', 'endyear', 
             'startperiod', 'endperiod', 'leave_n_out',
-            'n_oneyr', 'wghts_accross_lags', 'add_lsm',
-            'tfreq', 'lags', 'n_yrs', 'region',
-            'rollingmean', 
-            'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
-            'min_perc_area', 'prec_reg_max_d', 
-            'ROC_leave_n_out', 'method', 'n_boot',
+            'n_oneyr', 'method', 'ROC_leave_n_out',
+            'wghts_accross_lags', 'add_lsm',
+            'SCM_percentile_thres', 'tfreq', 'lags', 'n_yrs', 
+            'rollingmean', 'event_percentile',
+            'event_thres', 'extra_wght_dur',
+            'region', 'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
+             'min_perc_area', 'prec_reg_max_d', 
             'path_pp']
 
 def printset(print_ex=print_ex, ex=ex):
@@ -133,16 +127,13 @@ ex['n'] = n ; lag=0
 
 l_ds_CPPA, ex = func_CPPA.main(RV_ts, Prec_reg, ex)
 
-if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
-    l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                     grouping = 'group_accros_tests_single_lag', eps=10)
 
 
-
+output_dic_folder = ex['output_dic_folder']
 
 
 # save ex setting in text file
-output_dic_folder = ex['output_dic_folder']
+
 if os.path.isdir(output_dic_folder):
     answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
     if 'n' in answer:
@@ -276,8 +267,8 @@ for n in range(len(ex['train_test_list'])):
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
 
 
-score_AUC       = np.round(ex['score'][-1][0], 2)
-ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
+score_Sem       = np.round(ex['score'][-1][0], 2)
+ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_Sem[i]) for i in range(len(ex['lags'])) ]
 # Sem plot 
 # share kwargs with mcKinnon plot
 
@@ -289,7 +280,7 @@ kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
 mean_n_patterns = patterns_Sem.mean(dim='n_tests')
 mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
 mean_n_patterns.attrs['title'] = 'Composite mean - Objective Precursor Pattern'
-mean_n_patterns.name = 'ROC {}'.format(score_AUC)
+mean_n_patterns.name = 'ROC {}'.format(score_Sem)
 filename = os.path.join(ex['exp_folder'], 'mean_over_{}_tests'.format(ex['n_conv']) )
 func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
@@ -364,7 +355,7 @@ if ex['leave_n_out']:
         mean_n_patterns.attrs['units'] = 'Kelvin'
         mean_n_patterns.attrs['title'] = title
                              
-        mean_n_patterns.name = 'ROC {}'.format(score_AUC)
+        mean_n_patterns.name = 'ROC {}'.format(score_Sem)
         filename = os.path.join(ex['exp_folder'], ('weighted by robustness '
                              'over {} tests'.format(ex['n_conv']) ))
 #        kwrgs = dict( {'title' : mean_n_patterns.name, 'clevels' : 'default', 'steps':17,
@@ -428,23 +419,21 @@ func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=Tru
 #    func_CPPA.plot_oneyr_events(RV_ts, ex, i, folder, saving=True)
 
 #%% Plotting prediciton time series vs truth:
-yrs_to_plot = [1983, 1988, 1994, 2002, 2007, 2012, 2015]
+yrs_to_plot = [1985, 1990, 1995, 2004, 2007, 2012, 2015]
 #yrs_to_plot = list(np.arange(ex['startyear'],ex['endyear']+1))
 test = ex['train_test_list'][0][1]        
 plotting_timeseries(test, yrs_to_plot, ex) 
 
 
-
 #%% Initial regions from only composite extraction:
 
 lags = ex['lags']
-
 if ex['leave_n_out']:
     subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
     total_folder = os.path.join(ex['figpathbase'], subfolder)
     if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
     years = range(ex['startyear'], ex['endyear'])
-    for n in np.arange(0, ex['n_conv'], 4, dtype=int): 
+    for n in np.arange(0, ex['n_conv'], 3, dtype=int): 
         yr = years[n]
         pattern_num_init = l_ds_CPPA[n][key_pattern_num].sel(lag=lags)
         ROC_str_Sem_ = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
@@ -469,20 +458,20 @@ if ex['leave_n_out']:
         
         func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
         
-#        if ex['logit_valid'] == True:
-#            pattern_num = l_ds_CPPA[n]['pat_num_logit']
-#            pattern_num.attrs['title'] = ('{} - regions that were kept after logit regression '
-#                                         'pval < {}'.format(yr, ex['pval_logit_final']))
-#            filename = os.path.join(subfolder, pattern_num.attrs['title'].replace(
-#                                    ' ','_')+'.png')
-#            for_plt = pattern_num.copy()
-#            for_plt.values = for_plt.values-0.5
-#            kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
-#                           'steps' : for_plt.max()+2, 'subtitles': ROC_str_Sem_,
-#                           'vmin' : 0, 'vmax' : for_plt.max().values+0.5, 
-#                           'cmap' : plt.cm.tab20, 'column' : 2} )
-#            
-#            func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
+        if ex['logit_valid'] == True:
+            pattern_num = l_ds_CPPA[n]['pat_num_logit']
+            pattern_num.attrs['title'] = ('{} - regions that were kept after logit regression '
+                                         'pval < {}'.format(yr, ex['pval_logit_final']))
+            filename = os.path.join(subfolder, pattern_num.attrs['title'].replace(
+                                    ' ','_')+'.png')
+            for_plt = pattern_num.copy()
+            for_plt.values = for_plt.values-0.5
+            kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
+                           'steps' : for_plt.max()+2, 'subtitles': ROC_str_Sem_,
+                           'vmin' : 0, 'vmax' : for_plt.max().values+0.5, 
+                           'cmap' : plt.cm.tab20, 'column' : 2} )
+            
+            func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
 
 
 
@@ -525,9 +514,9 @@ if ex['leave_n_out']:
 #l_ds_CPPA        = [ex['score_per_run'][i][3] for i in range(len(ex['score_per_run']))]
 #ran_ROCS        = [ex['score_per_run'][i][4] for i in range(len(ex['score_per_run']))]
 #score_mcK       = np.round(ex['score_per_run'][-1][2]['score'], 2)
-#score_AUC       = np.round(ex['score_per_run'][-1][3]['score'], 2)
+#score_Sem       = np.round(ex['score_per_run'][-1][3]['score'], 2)
 #ROC_str_mcK      = ['{} days - ROC score {}'.format(ex['lags'][i], score_mcK[i].values) for i in range(len(ex['lags'])) ]
-#ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i].values) for i in range(len(ex['lags'])) ]
+#ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_Sem[i].values) for i in range(len(ex['lags'])) ]
 ## Sem plot
 ## share kwargs with mcKinnon plot
 #
@@ -539,7 +528,7 @@ if ex['leave_n_out']:
 #mean_n_patterns = patterns_Sem.mean(dim='n_tests')
 #mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
 #mean_n_patterns.attrs['title'] = 'Composite mean - Objective Precursor Pattern'
-#mean_n_patterns.name = 'ROC {}'.format(score_AUC.values)
+#mean_n_patterns.name = 'ROC {}'.format(score_Sem.values)
 #filename = os.path.join(ex['exp_folder'], 'mean_over_{}_tests'.format(ex['n_conv']) )
 #func_mcK.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 #
@@ -680,7 +669,7 @@ if ex['leave_n_out']:
 #        mean_n_patterns.attrs['units'] = 'Kelvin'
 #        mean_n_patterns.attrs['title'] = title
 #                             
-#        mean_n_patterns.name = 'ROC {}'.format(score_AUC.values)
+#        mean_n_patterns.name = 'ROC {}'.format(score_Sem.values)
 #        filename = os.path.join(ex['exp_folder'], ('weighted by robustness '
 #                             'over {} tests'.format(ex['n_conv']) ))
 ##        kwrgs = dict( {'title' : mean_n_patterns.name, 'clevels' : 'default', 'steps':17,

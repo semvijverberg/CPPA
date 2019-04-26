@@ -45,15 +45,17 @@ RV_ts, Prec_reg, ex = load_data.load_data(ex)
 
 
 print_ex = ['RV_name', 'name', 'max_break',
-            'min_dur', 'grid_res', 'startyear', 'endyear', 
+            'min_dur', 'event_percentile',
+            'event_thres', 'extra_wght_dur',
+            'grid_res', 'startyear', 'endyear', 
             'startperiod', 'endperiod', 'leave_n_out',
-            'n_oneyr', 'method', 'ROC_leave_n_out',
-            'wghts_accross_lags', 'n_conv',
-            'perc_map', 'tfreq', 'lags', 'n_yrs', 
-            'rollingmean', 'event_percentile',
-            'event_thres', 'perc_map', 'comp_perc', 'extra_wght_dur',
-            'region', 
-            'add_lsm', 'min_perc_prec_area', 'prec_reg_max_d']
+            'n_oneyr', 'wghts_accross_lags', 'add_lsm',
+            'tfreq', 'lags', 'n_yrs', 'region',
+            'rollingmean', 
+            'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
+            'min_perc_area', 'prec_reg_max_d', 
+            'ROC_leave_n_out', 'method', 'n_boot',
+            'path_pp']
 
 def printset(print_ex=print_ex, ex=ex):
     max_key_len = max([len(i) for i in print_ex])
@@ -143,14 +145,14 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
     print(exp_key)
     ex = ROC_score_wrapper(ex)
         
-    score_Sem       = np.round(ex['score'][0][0], 2)
+    score_AUC       = np.round(ex['score'][0][0], 2)
 
     # =============================================================================
     # Store data in output summary
     # =============================================================================
     if ex['lags'] == [0, 5, 10, 15, 20, 30, 40, 50, 60]:
         df = pd.read_csv(ex['shared_folder']+'/output_summ.csv', index_col='lag')
-        df[exp_key] = score_Sem
+        df[exp_key] = score_AUC
         df.to_csv(ex['shared_folder']+'/output_summ.csv')
     
     for idx, lag in enumerate(ex['lags']):
@@ -184,12 +186,12 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
 # =============================================================================
 #   Plotting
 # =============================================================================
-    ROC_str_Sem      = ['{} days - AUC score {}'.format(ex['lags'][i], score_Sem[i]) for i in range(len(ex['lags'])) ]
+    ROC_str_Sem      = ['{} days - AUC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
     lags = ex['lags']
 #    lags = [10] #5,15,30,50]   
     ROC_str_Sem_ = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
 #    lags = [15]
-#    score_Sem = [score_Sem[ex['lags'].index(l)] for l in lags]
+#    score_AUC = [score_AUC[ex['lags'].index(l)] for l in lags]
 #    ex['lags'] = lags
     
     lats = Prec_reg.latitude
@@ -228,7 +230,7 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
     mean_n_patterns = patterns_Sem.mean(dim='n_tests')
     mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
     mean_n_patterns.attrs['title'] = 'Composite mean - Objective Precursor Pattern'
-    mean_n_patterns.name = 'ROC {}'.format(score_Sem)
+    mean_n_patterns.name = 'ROC {}'.format(score_AUC)
     filename = os.path.join(ex['exp_folder'], 'mean_over_{}_tests'.format(ex['n_conv']) )
     func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
     
@@ -263,7 +265,7 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
         size_trainset = ex['n_yrs'] - ex['leave_n_years_out']
         Robustness_weights.attrs['title'] = ('Robustness\n test yr(s): {}, single '
                                 'training set (n={} yrs)'.format(yr,size_trainset))
-        Robustness_weights.attrs['units'] = 'Weights [{} ... 1]'.format(ex['comp_perc'])
+        Robustness_weights.attrs['units'] = 'Weights [{} ... 1]'.format(ex['FCP_thres'])
         filename = os.path.join(subfolder, Robustness_weights.attrs['title'].replace(
                                 ' ','_')+'.png')
         for_plt = Robustness_weights.where(Robustness_weights.values != 0).copy()
@@ -275,7 +277,7 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
             steps = 11
         kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
                        'steps' : 11, 'subtitles': ROC_str_Sem, 
-                       'vmin' : ex['comp_perc'], 'vmax' : for_plt.max().values+1E-9, 
+                       'vmin' : ex['FCP_thres'], 'vmax' : for_plt.max().values+1E-9, 
                        'cmap' : plt.cm.viridis_r, 'column' : 2,
                        'cbar_vert' : 0.05, 'cbar_hght' : 0.01,
                        'adj_fig_h' : 1.25, 'adj_fig_w' : 1., 
@@ -366,7 +368,7 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
             mean_n_patterns.attrs['units'] = 'Kelvin'
             mean_n_patterns.attrs['title'] = title
                                  
-            mean_n_patterns.name = 'ROC {}'.format(score_Sem)
+            mean_n_patterns.name = 'ROC {}'.format(score_AUC)
             filename = os.path.join(ex['exp_folder'], ('wghtrobus_'
                                  '{}_tests_{}'.format(ex['n_conv'], lags) ))
     #        kwrgs = dict( {'title' : mean_n_patterns.name, 'clevels' : 'default', 'steps':17,

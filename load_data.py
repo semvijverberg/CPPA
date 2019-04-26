@@ -29,12 +29,16 @@ def load_data(ex):
     RVtsfull = dicRV['RVfullts95']
     if ex['datafolder'] == 'ERAint':
         ex['mask'] = dicRV['RV_array']['mask']
-    else:
+    elif ex['datafolder'] == 'era5':
         ex['mask'] = dicRV['mask']
-    func_CPPA.xarray_plot(ex['mask'])
+    if ex['datafolder'] == 'ERAint' or ex['datafolder'] == 'era5':
+        func_CPPA.xarray_plot(ex['mask'])
+        lpyr = False
+    else:
+        lpyr = True
     RVhour   = RVtsfull.time[0].dt.hour.values
     datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
-                                    ex['startyear'], ex['endyear'])
+                                    ex['startyear'], ex['endyear'], lpyr=lpyr)
     ex['dates_RV'] = datesRV
     # add RVhour to daily dates
     datesRV = datesRV + pd.Timedelta(int(RVhour), unit='h')
@@ -53,7 +57,7 @@ def load_data(ex):
     else:
         percentile = ex['event_percentile']
         ex['event_thres'] = np.percentile(RV_ts.values, percentile)
-        ex['event_thres'] = '{}'.format(percentile)
+
     
     # Load in external ncdf
     
@@ -61,6 +65,8 @@ def load_data(ex):
     #path = os.path.join(ex['path_raw'], 'tmpfiles')
     # full globe - full time series
     varfullgl = func_CPPA.import_array(ex['filename_precur'], ex)
+    if varfullgl.longitude.min() < -175 and varfullgl.longitude.max() > 175:
+        varfullgl = func_CPPA.convert_longitude(varfullgl, 'only_east')
 
     Prec_reg = func_CPPA.find_region(varfullgl, region=ex['region'])[0]
     

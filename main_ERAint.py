@@ -9,12 +9,8 @@ import os, sys
 
 if os.path.isdir("/Users/semvijverberg/surfdrive/"):
     basepath = "/Users/semvijverberg/surfdrive/"
-    data_base_path = basepath
 else:
     basepath = "/home/semvij/"
-    data_base_path = "/p/projects/gotham/semvij/"
-
-
 os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
 sys.path.append(script_dir)
@@ -36,8 +32,8 @@ xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
 
-datafolder = 'era5'
-path_pp  = os.path.join(data_base_path, 'Data_'+datafolder +'/input_pp') # path to netcdfs
+datafolder = 'ERAint'
+path_pp  = os.path.join(basepath, 'Data_'+datafolder +'/input_pp') # path to netcdfs
 if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 
 
@@ -47,15 +43,15 @@ if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 ex = {'datafolder'  :       datafolder,
       'grid_res'    :       1.0,
      'startyear'    :       1979,
-     'endyear'      :       2018,
+     'endyear'      :       2017,
      'path_pp'      :       path_pp,
      'startperiod'  :       '06-24', #'1982-06-24',
      'endperiod'    :       '08-22', #'1982-08-22',
      'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
      'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-     'RVts_filename':       datafolder+"_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1.npy",
+     'RVts_filename':       'ERAint_t2mmax_US_1979-2017_averAggljacc0.75d_tf1_n4__to_t2mmax_US_tf1.npy',
      'RV_name'      :       't2mmax',
-     'name'         :       'sst',
+     'name'         :       'sst', 
      'add_lsm'      :       False,
      'region'       :       'Northern',
      'lags'         :       [0, 15, 30, 50], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
@@ -64,32 +60,32 @@ ex = {'datafolder'  :       datafolder,
 # =============================================================================
 # Settings for event timeseries
 # =============================================================================
-ex['tfreq']                 =       1 
-ex['max_break']             =       0   
-ex['min_dur']               =       1
-ex['event_percentile']      =       'std'    
+ex['tfreq']             =       1 
+ex['max_break']         =       0   
+ex['min_dur']           =       1
+ex['event_percentile']  =       'std'    
 # =============================================================================
 # Settins for precursor / CPPA
 # =============================================================================
-ex['filename_precur']       =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
-                                    ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
-ex['SCM_percentile_thres']  =       95
-ex['FCP_thres']             =       0.85
-ex['min_perc_area']    =       0.02 # min size region - in % of total prec area [m2]
-ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
-ex['days_before']           =       [0, 4, 8]
-ex['rollingmean']           =       ('CPPA', 1)
-ex['extra_wght_dur']        =       False
-ex['prec_reg_max_d']        =       1
-ex['wghts_accross_lags']    =       False
-ex['store_timeseries']      =       False
+ex['filename_precur']   =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
+                                ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
+ex['rollingmean']       =       ('CPPA', 1)
+ex['extra_wght_dur']    =       False
+ex['prec_reg_max_d']    =       1
+ex['SCM_percentile_thres']          =       95
+ex['FCP_thres']         =       0.85
+ex['min_perc_area']     =       0.02 # min size region - in % of total prec area [m2]
+ex['wghts_accross_lags']=       False
+ex['perc_yrs_out']      =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
+ex['days_before']       =       [0, 4, 8]
+ex['store_timeseries']  =       False
 # =============================================================================
 # Settings for validation     
 # =============================================================================
-ex['leave_n_out']           =       True
-ex['ROC_leave_n_out']       =       False
-ex['method']                =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
-ex['n_boot']                =       1000
+ex['leave_n_out']       =       True
+ex['ROC_leave_n_out']   =       False
+ex['method']            =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
+ex['n_boot']            =       1000
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
@@ -133,16 +129,13 @@ ex['n'] = n ; lag=0
 
 l_ds_CPPA, ex = func_CPPA.main(RV_ts, Prec_reg, ex)
 
-if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
-    l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                     grouping = 'group_accros_tests_single_lag', eps=10)
 
 
-
+output_dic_folder = ex['output_dic_folder']
 
 
 # save ex setting in text file
-output_dic_folder = ex['output_dic_folder']
+
 if os.path.isdir(output_dic_folder):
     answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
     if 'n' in answer:
@@ -434,17 +427,15 @@ test = ex['train_test_list'][0][1]
 plotting_timeseries(test, yrs_to_plot, ex) 
 
 
-
 #%% Initial regions from only composite extraction:
 
 lags = ex['lags']
-
 if ex['leave_n_out']:
     subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
     total_folder = os.path.join(ex['figpathbase'], subfolder)
     if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
     years = range(ex['startyear'], ex['endyear'])
-    for n in np.arange(0, ex['n_conv'], 4, dtype=int): 
+    for n in np.arange(0, ex['n_conv'], 3, dtype=int): 
         yr = years[n]
         pattern_num_init = l_ds_CPPA[n][key_pattern_num].sel(lag=lags)
         ROC_str_Sem_ = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
@@ -469,20 +460,20 @@ if ex['leave_n_out']:
         
         func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
         
-#        if ex['logit_valid'] == True:
-#            pattern_num = l_ds_CPPA[n]['pat_num_logit']
-#            pattern_num.attrs['title'] = ('{} - regions that were kept after logit regression '
-#                                         'pval < {}'.format(yr, ex['pval_logit_final']))
-#            filename = os.path.join(subfolder, pattern_num.attrs['title'].replace(
-#                                    ' ','_')+'.png')
-#            for_plt = pattern_num.copy()
-#            for_plt.values = for_plt.values-0.5
-#            kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
-#                           'steps' : for_plt.max()+2, 'subtitles': ROC_str_Sem_,
-#                           'vmin' : 0, 'vmax' : for_plt.max().values+0.5, 
-#                           'cmap' : plt.cm.tab20, 'column' : 2} )
-#            
-#            func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
+        if ex['logit_valid'] == True:
+            pattern_num = l_ds_CPPA[n]['pat_num_logit']
+            pattern_num.attrs['title'] = ('{} - regions that were kept after logit regression '
+                                         'pval < {}'.format(yr, ex['pval_logit_final']))
+            filename = os.path.join(subfolder, pattern_num.attrs['title'].replace(
+                                    ' ','_')+'.png')
+            for_plt = pattern_num.copy()
+            for_plt.values = for_plt.values-0.5
+            kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
+                           'steps' : for_plt.max()+2, 'subtitles': ROC_str_Sem_,
+                           'vmin' : 0, 'vmax' : for_plt.max().values+0.5, 
+                           'cmap' : plt.cm.tab20, 'column' : 2} )
+            
+            func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
 
 
 

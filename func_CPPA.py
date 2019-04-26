@@ -29,7 +29,6 @@ def main(RV_ts, Prec_reg, ex):
     #%%
     if (ex['method'] == 'no_train_test_split') : ex['n_conv'] = 1
     if ex['method'][:5] == 'split' : ex['n_conv'] = 1
-    if ex['method'][:6] == 'random' : ex['tested_yrs'] = []
     if ex['method'][:6] == 'random' : ex['n_conv'] = int(ex['n_yrs'] / int(ex['method'][6:]))
     if ex['method'] == 'iter': ex['n_conv'] = ex['n_yrs'] 
         
@@ -37,6 +36,8 @@ def main(RV_ts, Prec_reg, ex):
     if ex['ROC_leave_n_out'] == True or ex['method'] == 'no_train_test_split': 
         print('leave_n_out set to False')
         ex['leave_n_out'] = False
+    else:
+        ex['tested_yrs'] = []
 
 
     rmwhere, window = ex['rollingmean']
@@ -111,7 +112,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
                             ex['method'], ex['leave_n_years_out'], ex['startyear'], ex['endyear'],
                           ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
-                          ex['perc_map'], ex['comp_perc'], window, rmwhere, 
+                          ex['SCM_percentile_thres'], ex['FCP_thres'], window, rmwhere, 
                           now.strftime("%Y-%m-%d"))
 
     elif ex['method']=='no_train_test_split':
@@ -128,7 +129,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
                           ex['startyear'], ex['endyear'],
                           ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
-                          ex['perc_map'], ex['comp_perc'], ex['rollingmean'], 
+                          ex['SCM_percentile_thres'], ex['FCP_thres'], ex['rollingmean'], 
                           now.strftime("%Y-%m-%d"))
         
     else:
@@ -140,7 +141,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
                             ex['method'], ex['startyear'], ex['endyear'],
                           ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
-                          ex['perc_map'], ex['comp_perc'], window, rmwhere, 
+                          ex['SCM_percentile_thres'], ex['FCP_thres'], window, rmwhere, 
                           now.strftime("%Y-%m-%d"))
         
                        
@@ -325,7 +326,7 @@ def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag
 
 
 
-    jit_make_composites = numba.jit(nopython=True)(make_composites)
+    jit_make_composites = numba.jit(nopython=True, parallel=True)(make_composites)
     
     iter_regions = np.zeros( (comp_train_stack.shape[0]*len(mask_chunks), comp_train_stack[0,0].size), dtype='int8')
     iter_regions = jit_make_composites(mask_chunks, comp_train_stack, iter_regions)
@@ -335,7 +336,7 @@ def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag
 #    iter_regions = make_composites(mask_chunks, comp_train_stack, iter_regions)
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(iter_regions, axis=0), (lats.size, lons.size))) ; plt.colorbar()
 
-    mask_final = ( np.sum(iter_regions, axis=0) < int(ex['comp_perc'] * iter_regions.shape[0]))
+    mask_final = ( np.sum(iter_regions, axis=0) < int(ex['FCP_thres'] * iter_regions.shape[0]))
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.array(mask_final, dtype=int), (lats.size, lons.size))) ; plt.colorbar()
     weights = np.sum(iter_regions, axis=0)
     weights[mask_final==True] = 0.
@@ -994,10 +995,10 @@ def define_regions_and_rank_new(Corr_Coeff, lats, lons, A_gs, ex):
 	#---------------------------------------	
 	
     # keep only regions which are larger then the mean size of the regions
-    if ex['min_perc_prec_area'] == 'mean':
+    if ex['min_perc_area'] == 'mean':
         min_area = np.mean(Area) # mean area of all regions
     else:
-        min_area = (ex['min_perc_prec_area']/100.) * np.sum(A_gs) 
+        min_area = (ex['min_perc_area']/100.) * np.sum(A_gs) 
     
     R=[]
     Ar=[]
@@ -1330,20 +1331,28 @@ def area_weighted(xarray):
     return xr.DataArray(xarray.values * area_weights, coords=xarray.coords, 
                            dims=xarray.dims)
     
-def convert_longitude(data):
+def convert_longitude(data, to_format='west_east'):
     import numpy as np
     import xarray as xr
-    lon_above = data.longitude[np.where(data.longitude > 180)[0]]
-    lon_normal = data.longitude[np.where(data.longitude <= 180)[0]]
-    # roll all values to the right for len(lon_above amount of steps)
-    data = data.roll(longitude=len(lon_above))
-    # adapt longitude values above 180 to negative values
-    substract = lambda x, y: (x - y)
-    lon_above = xr.apply_ufunc(substract, lon_above, 360)
-    if lon_normal[0] == 0.:
-        convert_lon = xr.concat([lon_above, lon_normal], dim='longitude')
-    else:
-        convert_lon = xr.concat([lon_normal, lon_above], dim='longitude')
+    if to_format == 'west_east':
+        lon_above = data.longitude[np.where(data.longitude > 180)[0]]
+        lon_normal = data.longitude[np.where(data.longitude <= 180)[0]]
+        # roll all values to the right for len(lon_above amount of steps)
+        data = data.roll(longitude=len(lon_above))
+        # adapt longitude values above 180 to negative values
+        substract = lambda x, y: (x - y)
+        lon_above = xr.apply_ufunc(substract, lon_above, 360)
+        if lon_normal[0] == 0.:
+            convert_lon = xr.concat([lon_above, lon_normal], dim='longitude')
+        else:
+            convert_lon = xr.concat([lon_normal, lon_above], dim='longitude')
+        
+    elif to_format == 'only_east':
+        lon_above = data.longitude[np.where(data.longitude >= 0)[0]]
+        lon_below = data.longitude[np.where(data.longitude < 0)[0]]
+        lon_below += 360
+        data = data.roll(longitude=len(lon_below))
+        convert_lon = xr.concat([lon_above, lon_below], dim='longitude')
     data['longitude'] = convert_lon
     return data
 
@@ -1436,13 +1445,13 @@ def find_region(data, region='Pacific_US'):
     elif region ==  'Pacific':
         west_lon = -215; east_lon = -120; south_lat = 19; north_lat = 60
     elif region ==  'global':
-        west_lon = -360; east_lon = -1; south_lat = -80; north_lat = 80
+        west_lon = -360; east_lon = -0.1; south_lat = -80; north_lat = 80
     elif region ==  'Northern':
-        west_lon = -360; east_lon = -1; south_lat = -10; north_lat = 80
+        west_lon = -360; east_lon = -0.1; south_lat = -10; north_lat = 80
     elif region ==  'Southern':
-        west_lon = -360; east_lon = -1; south_lat = -80; north_lat = -10
+        west_lon = -360; east_lon = -0.1; south_lat = -80; north_lat = -10
     elif region ==  'Tropics':
-        west_lon = -360; east_lon = -1; south_lat = -15; north_lat = 30 
+        west_lon = -360; east_lon = -0.1; south_lat = -15; north_lat = 30 
     elif region ==  'elnino3.4':
         west_lon = -170; east_lon = -120; south_lat = -5; north_lat = 5 
 #    elif region == 'for_soil':
@@ -1676,9 +1685,9 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     #    l_ds_new[-1]['pat_num_CPPA'][0].plot()
     
     #plt.figure()
-    ex['max_N_regs'] = np.nanmax(PRECURSOR_DATA)
+    ex['max_N_regs'] = int(np.nanmax(PRECURSOR_DATA))
     #%%
-    return l_ds_new
+    return l_ds_new, ex
 
 def get_area(ds):
     longitude = ds.longitude
@@ -1981,8 +1990,8 @@ def finalfigure(xrdata, file_name, kwrgs):
             ax.set_title(kwrgs['subtitles'][n_ax], fontdict=fontdict, loc='center')
         
         if 'drawbox' in kwrgs.keys():
-            lons_sq = [-215, -215, -125, -125]
-            lats_sq = [50, 19, 19, 50]
+            lons_sq = [-215, -215, -130, -130] #[-215, -215, -125, -125] #[-215, -215, -130, -130] 
+            lats_sq = [50, 20, 20, 50]
             ring = LinearRing(list(zip(lons_sq , lats_sq )))
             ax.add_geometries([ring], ccrs.PlateCarree(), facecolor='none', edgecolor='green',
                               linewidth=3.5)
@@ -2075,8 +2084,10 @@ def finalfigure(xrdata, file_name, kwrgs):
 
 
 
-def figure_for_schematic(reg_all_1, composite_p1, chunks, lats, lons, ex):
+def figure_for_schematic(iter_regions, composite_p1, chunks, lats, lons, ex):
     #%%
+    reg_all_1 = iter_regions[:len(chunks)]
+    
     map_proj = ccrs.PlateCarree(central_longitude=220) 
     regions = np.reshape(reg_all_1, (reg_all_1.shape[0], lats.size, lons.size) )
     name_chnks = [str(chnk) for chnk in chunks]
@@ -2084,8 +2095,9 @@ def figure_for_schematic(reg_all_1, composite_p1, chunks, lats, lons, ex):
                            dims=['yrs_out', 'latitude', 'longitude'])
     folder = os.path.join(ex['figpathbase'], ex['CPPA_folder'], 'schematic_fig/')
     
-    plots = 9
+    plots = 3
     subset = np.linspace(0,regions.yrs_out.size-1,plots, dtype=int)
+    subset = [  1,  42, 80]
     regions = regions.isel(yrs_out=subset)
     regions  = regions.sel(latitude=slice(60.,0.))
     regions = regions.sel(longitude=slice(160, 250))
@@ -2115,7 +2127,7 @@ def figure_for_schematic(reg_all_1, composite_p1, chunks, lats, lons, ex):
         ax.set_title('')
         title = str(plotdata.yrs_out.values) 
         t = ax.text(0.006, 0.008, 
-                    'Composite excl. {}'.format(title),
+                    'excl. {}'.format(title),
             verticalalignment='bottom', horizontalalignment='left',
             transform=ax.transAxes,
             color='black', fontsize=30.37, weight='bold')
@@ -2128,7 +2140,7 @@ def figure_for_schematic(reg_all_1, composite_p1, chunks, lats, lons, ex):
     import cartopy.feature as cfeature
     lats_fig = slice(60.,5.)
     lons_fig = slice(165, 243)
-    mask_final = ( np.sum(reg_all_1, axis=0) < int(ex['comp_perc'] * len(chunks)))
+    mask_final = ( np.sum(reg_all_1, axis=0) < int(ex['FCP_thres'] * len(chunks)))
     nparray_comp = np.reshape(np.nan_to_num(composite_p1.values), (composite_p1.size))
     Corr_Coeff = np.ma.MaskedArray(nparray_comp, mask=mask_final)
     lat_grid = composite_p1.latitude.values
@@ -2184,7 +2196,7 @@ def figure_for_schematic(reg_all_1, composite_p1, chunks, lats, lons, ex):
     
 #    freq_rawprec.plot.contour(ax=ax, 
 #                               transform=ccrs.PlateCarree(), linewidths=3,
-#                               colors=['black'], levels=[0., (ex['comp_perc'] * n_max)-1, n_max],
+#                               colors=['black'], levels=[0., (ex['FCP_thres'] * n_max)-1, n_max],
 #                               subplot_kws={'projection': map_proj},
 #                               )
     
@@ -2324,7 +2336,7 @@ def figure_for_schematic(reg_all_1, composite_p1, chunks, lats, lons, ex):
 #
 #    ax.coastlines(color='black', alpha=0.8, linewidth=2)
 #    mask_wgths = xrdata.where(np.isnan(xrnpmap_init) == False)
-#    list_points = np.argwhere(mask_wgths.values > int(ex['comp_perc'] * len(chunks)) )
+#    list_points = np.argwhere(mask_wgths.values > int(ex['FCP_thres'] * len(chunks)) )
 #    x_co = mask_wgths.longitude.values
 #    y_co = mask_wgths.latitude.values
 ##        list_points = list_points - ex['grid_res']/2.

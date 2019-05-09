@@ -138,7 +138,7 @@ def get_opt_freq(RV_ts, ex):
             
     #%%
 
-def ac_plot(df, colwrap=3, kwrgs={}):
+def ac_plot(df, colwrap=3, kwrgs={'xmax':365}):
     if (df.columns.size) % colwrap == 0:
         rows = int(df.columns.size / colwrap)
     elif (df.columns.size) % colwrap != 0:
@@ -152,10 +152,14 @@ def ac_plot(df, colwrap=3, kwrgs={}):
             header = df.columns[i]
     
 #            autocorr_temp = autocorrelation(df['RVts'])[:60]
-            autocorr_CPPA = autocorrelation(df[header])[:365]
+            autocorr_CPPA = autocorrelation(df[header])[:kwrgs['xmax']]
 #            ax.plot(autocorr_temp, label='temp')
+            ax.hlines(1/np.e, xmin=0, xmax=kwrgs['xmax'])
+            ac_timesteps = np.min(np.where(autocorr_CPPA < 1/np.e))
+            header += ', ac 1/e: {} timesteps'.format(ac_timesteps)
             ax.plot(autocorr_CPPA, label=header)
             ax.grid(which='major')
+            
             ax.legend()
     if 'title' in kwrgs.keys():
         fig.text(0.5, 1.0, kwrgs['title'], fontsize=18, horizontalalignment='center',

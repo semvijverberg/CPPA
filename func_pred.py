@@ -25,9 +25,11 @@ def spatial_cov(ex, key1='spatcov_CPPA'):
     
 #    if 'use_ts_logit' not in ex.keys():
 #        ex['use_ts_logit'] = False ; ex['logit_valid'] = False
-    if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == False:
-        ex['test_ts_Sem'] = np.zeros( len(ex['lags']) , dtype=list)
-    
+    if 'use_ts_logit' in ex.keys():
+        if ex['use_ts_logit'] == False:
+            ex['test_ts_prec'] = np.zeros( len(ex['lags']) , dtype=list)
+    else:
+        ex['test_ts_prec'] = np.zeros( len(ex['lags']) , dtype=list)
     
     for n in range(len(ex['train_test_list'])):
         ex['n'] = n
@@ -63,10 +65,10 @@ def spatial_cov(ex, key1='spatcov_CPPA'):
                 
             
                 if ex['n'] == 0:
-                    ex['test_ts_Sem'][idx] = spat_cov_lag_i.values
+                    ex['test_ts_prec'][idx] = spat_cov_lag_i.values
         #                ex['test_RV_Sem'][idx]  = test['RV'].values
                 else:
-                    ex['test_ts_Sem'][idx] = np.concatenate( [ex['test_ts_Sem'][idx], spat_cov_lag_i.values] ) 
+                    ex['test_ts_prec'][idx] = np.concatenate( [ex['test_ts_prec'][idx], spat_cov_lag_i.values] ) 
             
 
 
@@ -111,7 +113,7 @@ def logit_fit_new(l_ds_CPPA, RV_ts, ex):
         or ex['ROC_leave_n_out'] or ex['method'][:6] == 'random'
         ):
         ex['test_ts_mcK'] = np.zeros( len(ex['lags']) , dtype=list)
-        ex['test_ts_Sem'] = np.zeros( len(ex['lags']) , dtype=list)
+        ex['test_ts_prec'] = np.zeros( len(ex['lags']) , dtype=list)
         ex['test_RV'] = np.zeros( len(ex['lags']) , dtype=list)
         ex['test_yrs'] = np.zeros( len(ex['lags']) , dtype=list)
     
@@ -217,14 +219,14 @@ def logit_fit_new(l_ds_CPPA, RV_ts, ex):
                 ):
                 if ex['n'] == 0:
 #                    ex['test_ts_mcK'][idx] = crosscorr_mcK.values 
-                    ex['test_ts_Sem'][idx] = ts_pred
+                    ex['test_ts_prec'][idx] = ts_pred
                     ex['test_RV'][idx]     = test['RV'].values
                     ex['test_yrs'][idx]    = test['RV'].time
         #                ex['test_RV_Sem'][idx]  = test['RV'].values
                 else:
         #                update_ROCS = ex['test_ts_mcK'][idx].append(list(crosscorr_mcK.values))
     #                ex['test_ts_mcK'][idx] = np.concatenate( [ex['test_ts_mcK'][idx], crosscorr_mcK.values] )
-                    ex['test_ts_Sem'][idx] = np.concatenate( [ex['test_ts_Sem'][idx], ts_pred] )
+                    ex['test_ts_prec'][idx] = np.concatenate( [ex['test_ts_prec'][idx], ts_pred] )
                     ex['test_RV'][idx]     = np.concatenate( [ex['test_RV'][idx], test['RV'].values] )  
                     ex['test_yrs'][idx]    = np.concatenate( [ex['test_yrs'][idx], test['RV'].time] )  
             

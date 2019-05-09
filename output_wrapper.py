@@ -190,9 +190,7 @@ def all_output_wrapper(dic, exp_key='CPPA_spatcov'):
     lags = ex['lags']
 #    lags = [10] #5,15,30,50]   
     ROC_str_Sem_ = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
-#    lags = [15]
-#    score_AUC = [score_AUC[ex['lags'].index(l)] for l in lags]
-#    ex['lags'] = lags
+
     
     lats = Prec_reg.latitude
     lons = Prec_reg.longitude

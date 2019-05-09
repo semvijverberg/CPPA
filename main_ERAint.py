@@ -192,6 +192,8 @@ ex = dic['ex']
 # load patterns
 l_ds_CPPA = dic['l_ds_CPPA']
 
+ex['n_boot'] = 0
+
 # write output in textfile
 if 'use_ts_logit' in ex.keys():
     predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
@@ -240,8 +242,21 @@ if ex['store_timeseries'] == True:
 else:
     key_pattern_num = 'pat_num_CPPA'
     ex = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
 
 
+
+score_AUC        = np.round(ex['score'][-1][0], 2)
+ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
+ROC_boot = [np.round(np.percentile(ex['score'][-1][1][i],99), 2) for i in range(len(ex['lags']))]
+
+ex['score_AUC']   = score_AUC
+ex['ROC_boot_99'] = ROC_boot
+
+filename = 'output_main_dic'
+to_dict = dict( { 'ex'      :   ex,
+                 'l_ds_CPPA' : l_ds_CPPA} )
+np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
 #%%
 # =============================================================================
 #   Plotting
@@ -269,12 +284,7 @@ for n in range(len(ex['train_test_list'])):
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
 
 
-score_AUC       = np.round(ex['score'][-1][0], 2)
-ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
-# Sem plot 
-# share kwargs with mcKinnon plot
-
-    
+   
 kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
                     'vmin' : -0.5, 'vmax' : 0.5, 'subtitles' : ROC_str_Sem,
                    'cmap' : plt.cm.RdBu_r, 'column' : 1} )
@@ -342,28 +352,30 @@ if ex['leave_n_out']:
 
 
 #%% Weighing features if there are extracted every run (training set)
-# weighted by persistence of pattern over
+
 if ex['leave_n_out']:
     kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
-                    'vmin' : -0.5, 'vmax' : 0.5, 'subtitles' : ROC_str_Sem,
-                   'cmap' : plt.cm.RdBu_r, 'column' : 1} )
+                    'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : ROC_str_Sem,
+                   'cmap' : plt.cm.RdBu_r, 'column' : 1,
+                   'cbar_vert' : 0.02, 'cbar_hght' : -0.01,
+                   'adj_fig_h' : 0.9, 'adj_fig_w' : 1., 
+                   'hspace' : 0.2, 'wspace' : 0.08,
+                   'title_h' : 0.95} )
     # weighted by persistence (all years == wgt of 1, less is below 1)
     mean_n_patterns = patterns_Sem.mean(dim='n_tests') * wghts/np.max(wghts)
     mean_n_patterns['lag'] = ROC_str_Sem
 
-    title = 'Composite mean - Objective Precursor Pattern'#\nweighted by robustness over {} tests'.format(
-#                                            ex['n_conv'])
+    title = 'Precursor Pattern'
     if mean_n_patterns.sum().values != 0.:
         mean_n_patterns.attrs['units'] = 'Kelvin'
         mean_n_patterns.attrs['title'] = title
                              
         mean_n_patterns.name = 'ROC {}'.format(score_AUC)
-        filename = os.path.join(ex['exp_folder'], ('weighted by robustness '
-                             'over {} tests'.format(ex['n_conv']) ))
-#        kwrgs = dict( {'title' : mean_n_patterns.name, 'clevels' : 'default', 'steps':17,
-#                        'vmin' : -3*mean_n_patterns.std().values, 'vmax' : 3*mean_n_patterns.std().values, 
-#                       'cmap' : plt.cm.RdBu_r, 'column' : 2} )
+        filename = os.path.join(ex['exp_folder'], ('{}_Precursor_pattern_robust_w_'
+                             '{}_tests'.format(ex['datafolder'], ex['n_conv']) ))
+
         func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
+
 
 
 

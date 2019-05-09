@@ -96,7 +96,12 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
                 if lag > 30:
                     obs_array = pd.DataFrame(ex['test_RV'][0])
                     obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
-                    threshold = (obs_array.mean() + obs_array.std()).values
+                    if ex['event_percentile'] == 'std':
+                        # binary time serie when T95 exceeds 1 std
+                        threshold = obs_array.mean().values + obs_array.std().values
+                    else:
+                        percentile = ex['event_percentile']
+                        threshold = np.percentile(obs_array.values, percentile)
                     events_idx = np.where(obs_array > threshold)[0]
                 else:
                     events_idx = np.where(ex['test_RV'][0] > ex['event_thres'])[0]
@@ -450,7 +455,7 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         yrs_to_plot.append( ex['endyear']+1 )
         df['yrs_plot'] = [yr in yrs_to_plot for yr in df['year']]
         df = df.where(df['yrs_plot']==True).dropna()
-        g = sns.FacetGrid(df, col='year', col_wrap=2, sharex=False, size=2.5,
+        g = sns.FacetGrid(df, col='year', col_wrap=3, sharex=False, size=2.5,
                           aspect = 2)
         import matplotlib.dates as mdates
         n_plots = len(g.axes)

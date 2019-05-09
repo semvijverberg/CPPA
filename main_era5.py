@@ -51,13 +51,14 @@ ex = {'datafolder'  :       datafolder,
      'endperiod'    :       '08-22', #'1982-08-22',
      'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
      'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-     'RVts_filename':       datafolder+"_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1.npy",
-     'RV_name'      :       't2mmax',
+     'RVts_filename':       "comp_v_spclus4of4_tempclus2_AgglomerativeClustering_smooth15days_clus1_daily.npy",
+     'RV_name'      :       'v_E-US',
      'name'         :       'sst',
      'add_lsm'      :       False,
      'region'       :       'Northern',
-     'lags'         :       [0, 15, 30, 50], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
+     'lags'         :       [0, 5, 10, 30], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
      'plot_ts'      :       True,
+     'exclude_yrs'  :      []
      }
 # =============================================================================
 # Settings for event timeseries
@@ -71,28 +72,30 @@ ex['event_percentile']      =       'std'
 # =============================================================================
 ex['filename_precur']       =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
                                     ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
-ex['rollingmean']           =       ('CPPA', 1)
+ex['rollingmean']           =       ('RV', 7)
 ex['extra_wght_dur']        =       False
 ex['prec_reg_max_d']        =       1
 ex['SCM_percentile_thres']  =       95
-ex['FCP_thres']             =       0.85
+ex['FCP_thres']             =       0.80
 ex['min_perc_area']         =       0.02 # min size region - in % of total prec area [m2]
 ex['wghts_accross_lags']    =       False
 ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
-ex['days_before']           =       [0, 4, 8]
+ex['days_before']           =       [0, 7, 14]
 ex['store_timeseries']      =       False
 # =============================================================================
 # Settings for validation     
 # =============================================================================
 ex['leave_n_out']           =       True
 ex['ROC_leave_n_out']       =       False
-ex['method']                =       'random3' #'iter' or 'no_train_test_split' or split#8 or random3  
-ex['n_boot']                =       1000
+ex['method']                =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
+ex['n_boot']                =       0
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
 RV_ts, Prec_reg, ex = load_data.load_data(ex)
 
+if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
+    ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 
 ex['exppathbase'] = '{}_{}_{}_{}'.format(datafolder, ex['RV_name'],ex['name'],
                       ex['region'])
 ex['figpathbase'] = os.path.join(ex['figpathbase'], ex['exppathbase'])
@@ -110,7 +113,7 @@ print_ex = ['RV_name', 'name', 'max_break',
             'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
             'min_perc_area', 'prec_reg_max_d', 
             'ROC_leave_n_out', 'method', 'n_boot',
-            'path_pp']
+            'RVts_filename', 'path_pp']
 
 
 def printset(print_ex=print_ex, ex=ex):
@@ -126,17 +129,14 @@ def printset(print_ex=print_ex, ex=ex):
 printset()
 n = 1
 ex['n'] = n ; lag=0
-#%% Run code with ex settings
+#%% 
 
-
+# =============================================================================
+# Run code with ex settings
+# =============================================================================
 
 l_ds_CPPA, ex = func_CPPA.main(RV_ts, Prec_reg, ex)
-
-if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
-    l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                     grouping = 'group_accros_tests_single_lag', eps=5)
-
-
+   
 
 
 # save ex setting in text file
@@ -171,39 +171,55 @@ with open(txtfile, "w") as text_file:
 
 
 
-
-#%%
 if ex['store_timeseries'] == True:
-    if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
+    if ex['method'] == 'iter': 
+        eps = 10
         l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                         grouping = 'group_accros_tests_single_lag', eps=5)
+                         grouping = 'group_accros_tests_single_lag', eps=10)
+    if ex['method'][:6] == 'random':
+        eps = 11
+        l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
+                         grouping = 'group_across_test_and_lags', eps=eps)
         
+    func_CPPA.plot_precursor_regions(l_ds_CPPA, 2, 'pat_num_CPPA', [0], [''], ex)
+    print('\n\n\nCheck labelling\n\n\n')
+    func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA_clust', [0], [''], ex)
+    
+    
     func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+    
+    
     ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
     ex = ROC_score_wrapper(ex)
     args = ['python output_wrapper.py {}'.format(output_dic_folder)]
     func_CPPA.kornshell_with_input(args, ex)
 
 
-#%% Generate output in console
 
 
+
+#%% 
+
+# =============================================================================
+# Load and Generate output in console
+# =============================================================================
 
 filename = 'output_main_dic'
 dic = np.load(os.path.join(output_dic_folder, filename+'.npy'),  encoding='latin1').item()
-
+#%%
 # load settings
 ex = dic['ex']
 # load patterns
 l_ds_CPPA = dic['l_ds_CPPA']
 
-ex['min_perc_area'] = ex['min_perc_prec_area']
-ex['SCM_percentile_thres'] = ex['perc_map']
-ex['FCP_thres'] = ex['comp_perc']
+#ex['min_perc_area'] = ex['min_perc_prec_area']
+#ex['n_boot'] = 0
+#ex['SCM_percentile_thres'] = ex['perc_map']
+#ex['FCP_thres'] = ex['comp_perc']
 
 
 # write output in textfile
-if 'use_ts_logit' in ex.keys():
+if 'use_ts_logit' in ex.keys() and 'pval_logit_final' in ex.keys():
     predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
 else:
     predict_folder = 'spatcov_CPPA'
@@ -221,6 +237,10 @@ with open(txtfile, "w") as text_file:
         printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
         print(printline)
         print(printline, file=text_file)
+
+
+
+
 
 
 #%%
@@ -250,12 +270,11 @@ if ex['store_timeseries'] == True:
 else:
     key_pattern_num = 'pat_num_CPPA'
     ex = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-
+if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
 
 score_AUC       = np.round(ex['score'][-1][0], 2)
 ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
-if ex['n_boot'] != 0:
-    ROC_boot = [np.round(np.percentile(ex['score'][-1][1][i],99), 2) for i in range(len(ex['lags']))]
+ROC_boot = [np.round(np.percentile(ex['score'][-1][1][i],99), 2) for i in range(len(ex['lags']))]
 
 ex['score_AUC']   = score_AUC
 ex['ROC_boot_99'] = ROC_boot
@@ -292,25 +311,19 @@ for n in range(len(ex['train_test_list'])):
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
 
 
-
-
-
-# Sem plot 
-# share kwargs with mcKinnon plot
-
     
 kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
-                    'vmin' : -0.5, 'vmax' : 0.5, 'subtitles' : ROC_str_Sem,
+                    'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : ROC_str_Sem,
                    'cmap' : plt.cm.RdBu_r, 'column' : 1} )
 
 mean_n_patterns = patterns_Sem.mean(dim='n_tests')
 mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
-mean_n_patterns.attrs['title'] = 'Composite mean - Objective Precursor Pattern'
+mean_n_patterns.attrs['title'] = 'CPPA - Precursor Pattern'
 mean_n_patterns.name = 'ROC {}'.format(score_AUC)
-filename = os.path.join(ex['exp_folder'], 'mean_over_{}_tests'.format(ex['n_conv']) )
+filename = os.path.join('', 'mean_over_{}_tests'.format(ex['n_conv']) )
 func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
-    
+print(ROC_boot)
 
 
 #%% Robustness accross training sets
@@ -324,9 +337,10 @@ wgts_tests = xr.DataArray(data=array,
                 dims=['n_tests', 'lag','latitude','longitude'], 
                 name='{}_tests_wghts'.format(ex['n_conv']), attrs={'units':'wghts ['})
 for n in range(ex['n_conv']):
-    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=ex['lags'])
+#    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=ex['lags'])
+    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=ex['lags']).where(l_ds_CPPA[n]['pat_num_CPPA']>0.5)
     
-    
+from matplotlib.colors import LinearSegmentedColormap 
 if ex['leave_n_out']:
     n_lags = len(ex['lags'])
     n_lats = patterns_Sem.sel(n_tests=0).latitude.size
@@ -348,20 +362,23 @@ if ex['leave_n_out']:
     pers_patt.attrs['units'] = 'No. of times in final pattern [0 ... {}]'.format(ex['n_conv'])
     pers_patt.attrs['title'] = ('Robustness SST pattern\n{} different '
                             'training sets (n={} yrs)'.format(ex['n_conv'],size_trainset))
-    filename = os.path.join(ex['exp_folder'], 'Robustness_across_{}_training_tests'.format(ex['n_conv']) )
+    filename = os.path.join('', 'Robustness_across_{}_training_tests'.format(ex['n_conv']) )
     vmax = ex['n_conv'] 
     mean = np.round(pers_patt.mean(dim=('latitude', 'longitude')).values, 1)
 #    mean = pers_patt.quantile(0.80, dim=('latitude','longitude')).values
     std =  np.round(pers_patt.std(dim=('latitude', 'longitude')).values, 0)
     ax_text = ['mean = {}±{}'.format(mean[l],int(std[l])) for l in range(len(ex['lags']))]
+    colors = plt.cm.magma_r(np.linspace(0,0.7, 20))
+    colors[-1] = plt.cm.magma_r(np.linspace(0.99,1, 1))
+    cm = LinearSegmentedColormap.from_list('test', colors, N=255)
     kwrgs = dict( {'title' : pers_patt.attrs['title'], 'clevels' : 'notdefault', 
                    'steps' : 11, 'subtitles': ROC_str_Sem, 
                    'vmin' : max(0,vmax-20), 'vmax' : vmax, 'clim' : (max(0,vmax-20), vmax),
-                   'cmap' : plt.cm.magma_r, 'column' : 2, 'extend':['min','yellow'],
+                   'cmap' : cm, 'column' : 2, 'extend':['min','yellow'],
                    'cbar_vert' : 0.05, 'cbar_hght' : 0.01,
                    'adj_fig_h' : 1.25, 'adj_fig_w' : 1., 
-                   'hspace' : 0.02, 'wspace' : 0.08,
-                   'ax_text': ax_text } )
+                   'hspace' : 0.02, 'wspace' : 0.08
+                    } )
     func_CPPA.plotting_wrapper(pers_patt, ex, filename, kwrgs=kwrgs)
 
 
@@ -371,23 +388,24 @@ if ex['leave_n_out']:
 if ex['leave_n_out']:
     kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
                     'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : ROC_str_Sem,
-                   'cmap' : plt.cm.RdBu_r, 'column' : 1} )
+                   'cmap' : plt.cm.RdBu_r, 'column' : 1,
+                   'cbar_vert' : 0.02, 'cbar_hght' : -0.01,
+                   'adj_fig_h' : 0.9, 'adj_fig_w' : 1., 
+                   'hspace' : 0.2, 'wspace' : 0.08,
+                   'title_h' : 0.95} )
     # weighted by persistence (all years == wgt of 1, less is below 1)
     mean_n_patterns = patterns_Sem.mean(dim='n_tests') * wghts/np.max(wghts)
     mean_n_patterns['lag'] = ROC_str_Sem
 
-    title = 'Composite mean - Objective Precursor Pattern'#\nweighted by robustness over {} tests'.format(
-#                                            ex['n_conv'])
+    title = 'Precursor Pattern'
     if mean_n_patterns.sum().values != 0.:
         mean_n_patterns.attrs['units'] = 'Kelvin'
         mean_n_patterns.attrs['title'] = title
                              
         mean_n_patterns.name = 'ROC {}'.format(score_AUC)
-        filename = os.path.join(ex['exp_folder'], ('weighted by robustness '
-                             'over {} tests'.format(ex['n_conv']) ))
-#        kwrgs = dict( {'title' : mean_n_patterns.name, 'clevels' : 'default', 'steps':17,
-#                        'vmin' : -3*mean_n_patterns.std().values, 'vmax' : 3*mean_n_patterns.std().values, 
-#                       'cmap' : plt.cm.RdBu_r, 'column' : 2} )
+        filename = os.path.join('', ('{}_Precursor_pattern_robust_w_'
+                             '{}_tests'.format(ex['datafolder'], ex['n_conv']) ))
+
         func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
 
@@ -403,9 +421,14 @@ years = range(ex['startyear'], ex['endyear'])
 #n_land = np.sum(np.array(np.isnan(Prec_reg.values[0]),dtype=int) )
 #n_sea = Prec_reg[0].size - n_land
 if ex['method'] == 'iter':
-    test_set_to_plot = [1990, 2000, 2010, 2012, 2015]
+    sorted_idx = np.argsort(ex['n_events'])
+    sorted_n_events = ex['n_events'].copy(); sorted_n_events.sort()
+    test_set_to_plot = [ex['tested_yrs'][n][0] for n in sorted_idx[:6]]
+    [test_set_to_plot.append(ex['tested_yrs'][n][0]) for n in sorted_idx[-5:]]
 elif ex['method'][:6] == 'random':
     test_set_to_plot = [set(t[1]['RV'].time.dt.year.values) for t in ex['train_test_list'][::5]]
+elif ex['method'][:] == 'no_train_test_split':
+    test_set_to_plot = ['None']
 #test_set_to_plot = list(np.arange(0,ex['n_conv'],5))
 for yr in test_set_to_plot: 
     n = test_set_to_plot.index(yr)
@@ -414,7 +437,7 @@ for yr in test_set_to_plot:
     Robustness_weights.attrs['title'] = ('Robustness\n test yr(s): {}, single '
                             'training set (n={} yrs)'.format(yr,size_trainset))
     Robustness_weights.attrs['units'] = 'Weights [{} ... 1]'.format(ex['FCP_thres'])
-    filename = os.path.join(subfolder, Robustness_weights.attrs['title'].replace(
+    filename = os.path.join('', Robustness_weights.attrs['title'].replace(
                             ' ','_')+'.png')
     for_plt = Robustness_weights.where(Robustness_weights.values != 0).copy()
 #    n_pattern = Prec_reg[0].size - np.sum(np.array(np.isnan(for_plt[0]),dtype=int))
@@ -448,7 +471,12 @@ func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=Tru
 #%% Plotting prediciton time series vs truth:
 if ex['method'] == 'iter':
     yrs_to_plot = [1983, 1988, 1994, 2002, 2007, 2012, 2015]
-    #yrs_to_plot = list(np.arange(ex['startyear'],ex['endyear']+1))
+    if 'n_events' in ex.keys():
+        sorted_idx = np.argsort(ex['n_events'])
+        sorted_n_events = ex['n_events'].copy(); sorted_n_events.sort()
+        yrs_to_plot = [ex['tested_yrs'][n][0] for n in sorted_idx[:6]]
+        [yrs_to_plot.append(ex['tested_yrs'][n][0]) for n in sorted_idx[-5:]]
+
     test = ex['train_test_list'][0][1]        
     plotting_timeseries(test, yrs_to_plot, ex) 
 
@@ -460,51 +488,17 @@ if ex['leave_n_out']:
     subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
     total_folder = os.path.join(ex['figpathbase'], subfolder)
     if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-    years = range(ex['startyear'], ex['endyear'])
-    for n in np.linspace(0, ex['n_conv']-1, 6, dtype=int): 
-        yr = years[n]
-        pattern_num_init = l_ds_CPPA[n][key_pattern_num].sel(lag=lags)
-        ROC_str_Sem_ = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
+    subtitles = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
+    
         
+    func_CPPA.plot_precursor_regions(l_ds_CPPA, ex['n_conv'], key_pattern_num, lags, subtitles, ex)
 
+#%%
+for i, yr in enumerate(ex['all_yrs']):
+    print(yr, ex['n_events'][i])
 
-        pattern_num_init.attrs['title'] = ('{} - CPPA regions'.format(yr))
-        filename = os.path.join(subfolder, pattern_num_init.attrs['title'].replace(
-                                ' ','_')+'.png')
-        for_plt = pattern_num_init.copy()
-        for_plt.values = for_plt.values-0.5
-        
-        if 'max_N_regs' not in ex.keys():
-            ex['max_N_regs'] = int(for_plt.max() + 0.5)
-        
-        kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
-                       'steps' : ex['max_N_regs']+1, 'subtitles': ROC_str_Sem_,
-                       'vmin' : 0, 'vmax' : ex['max_N_regs'], 
-                       'cmap' : plt.cm.tab20, 'column' : 1,
-                       'cbar_vert' : 0.0, 'cbar_hght' : 0.0,
-                       'adj_fig_h' : 1., 'adj_fig_w' : 1., 
-                       'hspace' : 0.2, 'wspace' : 0.08,
-                       'cticks_center' : True} )
-        
-        func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
-        
-#        if ex['logit_valid'] == True:
-#            pattern_num = l_ds_CPPA[n]['pat_num_logit']
-#            pattern_num.attrs['title'] = ('{} - regions that were kept after logit regression '
-#                                         'pval < {}'.format(yr, ex['pval_logit_final']))
-#            filename = os.path.join(subfolder, pattern_num.attrs['title'].replace(
-#                                    ' ','_')+'.png')
-#            for_plt = pattern_num.copy()
-#            for_plt.values = for_plt.values-0.5
-#            kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
-#                           'steps' : for_plt.max()+2, 'subtitles': ROC_str_Sem_,
-#                           'vmin' : 0, 'vmax' : for_plt.max().values+0.5, 
-#                           'cmap' : plt.cm.tab20, 'column' : 2} )
-#            
-#            func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
-
-
-
-
-
-
+#%%
+#pd.DataFrame(ex['test_ts_prec'][0]).plot.kde(bw_method=0.1)
+#pd.DataFrame(ex['test_RV'][0]).plot.kde(bw_method=0.1)
+#pd.DataFrame(ex['test_RV'][0]*ex['test_ts_prec'][0]).plot()
+#pd.DataFrame(ex['test_ts_prec'][0]).plot()

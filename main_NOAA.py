@@ -60,31 +60,32 @@ ex = {'datafolder'  :       datafolder,
 # =============================================================================
 # Settings for event timeseries
 # =============================================================================
-ex['tfreq']             =       1 
-ex['max_break']         =       0   
-ex['min_dur']           =       1
-ex['event_percentile']  =       'std'    
+ex['tfreq']                 =       1 
+ex['max_break']             =       0   
+ex['min_dur']               =       1
+ex['event_percentile']      =       'std'    
 # =============================================================================
 # Settins for precursor / CPPA
 # =============================================================================
-ex['filename_precur']   =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
-                                ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
-ex['rollingmean']       =       ('CPPA', 1)
-ex['extra_wght_dur']    =       False
-ex['prec_reg_max_d']    =       1
-ex['SCM_percentile_thres']          =       95
-ex['FCP_thres']         =       0.85
-ex['min_perc_area']=       0.02 # min size region - in % of total prec area [m2]
-ex['wghts_accross_lags']=       False
-ex['perc_yrs_out']      =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
-ex['days_before']       =       [0, 4, 8]
-ex['store_timeseries']  =       False
+ex['filename_precur']       =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
+                                    ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
+ex['rollingmean']           =       ('CPPA', 1)
+ex['extra_wght_dur']        =       False
+ex['prec_reg_max_d']        =       1
+ex['SCM_percentile_thres']  =       95
+ex['FCP_thres']             =       0.85
+ex['min_perc_area']         =       0.02 # min size region - in % of total prec area [m2]
+ex['wghts_accross_lags']    =       False
+ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
+ex['days_before']           =       [0, 4, 8]
+ex['store_timeseries']      =       False
 # =============================================================================
 # Settings for validation     
 # =============================================================================
-ex['leave_n_out']       =       True
-ex['ROC_leave_n_out']   =       False
-ex['method']            =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
+ex['leave_n_out']           =       True
+ex['ROC_leave_n_out']       =       False
+ex['method']                =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
+ex['n_boot']                =       1000
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
@@ -238,7 +239,20 @@ if ex['store_timeseries'] == True:
 else:
     key_pattern_num = 'pat_num_CPPA'
     ex = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
 
+
+score_AUC        = np.round(ex['score'][-1][0], 2)
+ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
+ROC_boot = [np.round(np.percentile(ex['score'][-1][1][i],99), 2) for i in range(len(ex['lags']))]
+
+ex['score_AUC']   = score_AUC
+ex['ROC_boot_99'] = ROC_boot
+
+filename = 'output_main_dic'
+to_dict = dict( { 'ex'      :   ex,
+                 'l_ds_CPPA' : l_ds_CPPA} )
+np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
 
 #%%
 # =============================================================================
@@ -266,12 +280,6 @@ for n in range(len(ex['train_test_list'])):
     upd_pattern = l_ds_CPPA[n]['pattern_' + name_for_ts].sel(lag=ex['lags'])
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
 
-
-score_Sem       = np.round(ex['score'][-1][0], 2)
-ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_Sem[i]) for i in range(len(ex['lags'])) ]
-# Sem plot 
-# share kwargs with mcKinnon plot
-
     
 kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
                     'vmin' : -0.5, 'vmax' : 0.5, 'subtitles' : ROC_str_Sem,
@@ -280,7 +288,7 @@ kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
 mean_n_patterns = patterns_Sem.mean(dim='n_tests')
 mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
 mean_n_patterns.attrs['title'] = 'Composite mean - Objective Precursor Pattern'
-mean_n_patterns.name = 'ROC {}'.format(score_Sem)
+mean_n_patterns.name = 'ROC {}'.format(score_AUC)
 filename = os.path.join(ex['exp_folder'], 'mean_over_{}_tests'.format(ex['n_conv']) )
 func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
@@ -355,7 +363,7 @@ if ex['leave_n_out']:
         mean_n_patterns.attrs['units'] = 'Kelvin'
         mean_n_patterns.attrs['title'] = title
                              
-        mean_n_patterns.name = 'ROC {}'.format(score_Sem)
+        mean_n_patterns.name = 'ROC {}'.format(score_AUC)
         filename = os.path.join(ex['exp_folder'], ('weighted by robustness '
                              'over {} tests'.format(ex['n_conv']) ))
 #        kwrgs = dict( {'title' : mean_n_patterns.name, 'clevels' : 'default', 'steps':17,
@@ -514,9 +522,9 @@ if ex['leave_n_out']:
 #l_ds_CPPA        = [ex['score_per_run'][i][3] for i in range(len(ex['score_per_run']))]
 #ran_ROCS        = [ex['score_per_run'][i][4] for i in range(len(ex['score_per_run']))]
 #score_mcK       = np.round(ex['score_per_run'][-1][2]['score'], 2)
-#score_Sem       = np.round(ex['score_per_run'][-1][3]['score'], 2)
+#score_AUC       = np.round(ex['score_per_run'][-1][3]['score'], 2)
 #ROC_str_mcK      = ['{} days - ROC score {}'.format(ex['lags'][i], score_mcK[i].values) for i in range(len(ex['lags'])) ]
-#ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_Sem[i].values) for i in range(len(ex['lags'])) ]
+#ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i].values) for i in range(len(ex['lags'])) ]
 ## Sem plot
 ## share kwargs with mcKinnon plot
 #
@@ -528,7 +536,7 @@ if ex['leave_n_out']:
 #mean_n_patterns = patterns_Sem.mean(dim='n_tests')
 #mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
 #mean_n_patterns.attrs['title'] = 'Composite mean - Objective Precursor Pattern'
-#mean_n_patterns.name = 'ROC {}'.format(score_Sem.values)
+#mean_n_patterns.name = 'ROC {}'.format(score_AUC.values)
 #filename = os.path.join(ex['exp_folder'], 'mean_over_{}_tests'.format(ex['n_conv']) )
 #func_mcK.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 #
@@ -669,7 +677,7 @@ if ex['leave_n_out']:
 #        mean_n_patterns.attrs['units'] = 'Kelvin'
 #        mean_n_patterns.attrs['title'] = title
 #                             
-#        mean_n_patterns.name = 'ROC {}'.format(score_Sem.values)
+#        mean_n_patterns.name = 'ROC {}'.format(score_AUC.values)
 #        filename = os.path.join(ex['exp_folder'], ('weighted by robustness '
 #                             'over {} tests'.format(ex['n_conv']) ))
 ##        kwrgs = dict( {'title' : mean_n_patterns.name, 'clevels' : 'default', 'steps':17,

@@ -247,6 +247,20 @@ if ex['store_timeseries'] == True:
 else:
     key_pattern_num = 'pat_num_CPPA'
     ex = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
+
+
+score_AUC        = np.round(ex['score'][-1][0], 2)
+ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
+ROC_boot = [np.round(np.percentile(ex['score'][-1][1][i],99), 2) for i in range(len(ex['lags']))]
+
+ex['score_AUC']   = score_AUC
+ex['ROC_boot_99'] = ROC_boot
+
+filename = 'output_main_dic'
+to_dict = dict( { 'ex'      :   ex,
+                 'l_ds_CPPA' : l_ds_CPPA} )
+np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
 
 
 #%%
@@ -276,12 +290,8 @@ for n in range(len(ex['train_test_list'])):
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
 
 
-score_AUC       = np.round(ex['score'][-1][0], 2)
-ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
-# Sem plot 
-# share kwargs with mcKinnon plot
 
-    
+   
 kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
                     'vmin' : -0.5, 'vmax' : 0.5, 'subtitles' : ROC_str_Sem,
                    'cmap' : plt.cm.RdBu_r, 'column' : 1} )

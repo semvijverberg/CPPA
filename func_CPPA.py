@@ -12,6 +12,7 @@ import numpy as np
 from netCDF4 import num2date
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import matplotlib.colors as colors
 import matplotlib as mpl
 from shapely.geometry.polygon import LinearRing
@@ -22,7 +23,18 @@ import datetime, calendar
 from sklearn.cluster import DBSCAN
 import scipy 
 flatten = lambda l: [item for sublist in l for item in sublist]
+def get_oneyr(pddatetime, *args):
+    dates = []
+    pddatetime = pd.to_datetime(pddatetime)
+    year = pddatetime.year[0]
 
+    for arg in args:
+        year = arg
+        dates.append(pddatetime.where(pddatetime.year==year).dropna())
+    dates = pd.to_datetime(flatten(dates))
+    if len(dates) == 0:
+        dates.append(pddatetime.where(pddatetime.year==year).dropna())
+    return dates
 
 
 def main(RV_ts, Prec_reg, ex):
@@ -68,7 +80,7 @@ def main(RV_ts, Prec_reg, ex):
         if (ex['ROC_leave_n_out'] == True) & (ex['n']==0):
             # start selecting leave_n_out
             ex['leave_n_out'] = True
-            train, test, ex['test_years'] = rand_traintest(RV_ts, Prec_reg, 
+            train, test, ex = rand_traintest(RV_ts, Prec_reg, 
                                               ex)    
         
 #        elif (ex['leave_n_out'] == True) & (ex['ROC_leave_n_out'] == False):
@@ -86,9 +98,12 @@ def main(RV_ts, Prec_reg, ex):
         
         # appending tuple
         train_test_list.append( (train, test) )
-        
+    if ex['method'] != 'no_train_test_split':
+        if len(set(flatten(ex['tested_yrs']))) != ex['n_yrs']:
+            print('train test set appears to contain duplicates')
     ex['train_test_list'] = train_test_list
-    
+    ex['output_ts_folder'] = os.path.join(ex['output_dic_folder'], 'timeseries_robwghts')
+    if os.path.isdir(ex['output_ts_folder']) != True : os.makedirs(ex['output_ts_folder'])
     #%%
     return l_ds_CPPA, ex
 
@@ -105,7 +120,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
     now = datetime.datetime.now()
     rmwhere, window = ex['rollingmean']
     if ex['leave_n_out'] == True and ex['method'][:6] == 'random':
-        train, test, ex['test_years'] = rand_traintest(RV_ts, Prec_reg, 
+        train, test, ex = rand_traintest(RV_ts, Prec_reg, 
                                           ex)
         
         general_folder = '{}_leave_{}_out_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}rm{}_{}'.format(
@@ -133,7 +148,7 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
                           now.strftime("%Y-%m-%d"))
         
     else:
-        train, test, ex['test_years'] = rand_traintest(RV_ts, Prec_reg, 
+        train, test, ex = rand_traintest(RV_ts, Prec_reg, 
                                           ex)
     
 
@@ -444,8 +459,6 @@ def spatial_mean_regions(Regions_lag_i, regions_for_ts, ts_3d, npmean):
 
 def store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
     #%%
-    ex['output_ts_folder'] = os.path.join(ex['output_dic_folder'], 'timeseries_robwghts')
-    if os.path.isdir(ex['output_ts_folder']) != True : os.makedirs(ex['output_ts_folder'])
     
     for n in range(len(ex['train_test_list'])):
         ex['n'] = n
@@ -471,7 +484,7 @@ def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
         idx = ex['lags'].index(lag)
 
 
-        mask_regions = np.nan_to_num(ds_Sem['pat_num_CPPA'].sel(lag=lag).values) >= 1
+        mask_regions = np.nan_to_num(ds_Sem['pat_num_CPPA_clust'].sel(lag=lag).values) >= 1
         # Make time series for whole period
         ts_3d    = Prec_reg
         mask_notnan = (np.product(np.isnan(ts_3d.values),axis=0)==False) # nans == False
@@ -488,7 +501,7 @@ def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
         
         
         # regions for time series
-        Regions_lag_i = ds_Sem['pat_num_CPPA'][idx].squeeze().values
+        Regions_lag_i = ds_Sem['pat_num_CPPA_clust'][idx].squeeze().values
         regions_for_ts = np.unique(Regions_lag_i[~np.isnan(Regions_lag_i)])
         # spatial mean (normalized & weighted)
         ts_regions_lag_i, sign_ts_regions = spatial_mean_regions(Regions_lag_i, 
@@ -506,7 +519,7 @@ def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
         
         
         # spatial covariance of whole CPPA pattern
-        spatcov_CPPA = cross_correlation_patterns(ts_3d_w, CPPA_w)
+        spatcov_CPPA = cross_correlation_patterns(ts_3d_w, pattern_CPPA)
         # mean of El nino 3.4
         ts_3d_nino = find_region(Prec_reg, region='elnino3.4')[0]
         # get lonlat array of area for taking spatial means 
@@ -559,8 +572,8 @@ def func_dates_min_lag(dates, lag):
 
 def rand_traintest(RV_ts, Prec_reg, ex):
     #%%
-    if ex['n'] == 0: ex['tested_yrs'] = []
-    all_years = np.arange(ex['startyear'], ex['endyear']+1)
+    if ex['n'] == 0: ex['tested_yrs'] = [] ; ex['n_events'] = []
+    ex['all_yrs'] = np.unique(RV_ts.time.dt.year)
     
     # conditions failed initally assumed True
     a_conditions_failed = True
@@ -576,13 +589,16 @@ def rand_traintest(RV_ts, Prec_reg, ex):
             size_train = int(ex['n_yrs'] - size_test)
 
             ex['leave_n_years_out'] = size_test
-            yrs_to_draw_sample = [yr for yr in all_years if yr not in flatten(ex['tested_yrs'])]
+            yrs_to_draw_sample = [yr for yr in ex['all_yrs'] if yr not in flatten(ex['tested_yrs'])]
             if (len(yrs_to_draw_sample) - size_test) >= size_test:
                 rand_test_years = np.random.choice(yrs_to_draw_sample, ex['leave_n_years_out'], replace=False)
             # if last test sample will be too small for next iteration, add test yrs to current test yrs
             if (len(yrs_to_draw_sample) - size_test) < size_test:
                 rand_test_years = yrs_to_draw_sample  
-
+            check_double_test = [yr for yr in rand_test_years if yr in flatten( ex['tested_yrs'] )]
+            if len(check_double_test) != 0 :
+                a_conditions_failed = True
+                print('test year drawn twice, redoing sampling')
                 
             
         elif ex['method'] == 'iter':
@@ -591,33 +607,29 @@ def rand_traintest(RV_ts, Prec_reg, ex):
                 n = ex['n'] - ex['n_yrs']
             else:
                 n = ex['n']
-            rand_test_years = [all_years[n]]
+            rand_test_years = [ex['all_yrs'][n]]
             
         elif ex['method'][:5] == 'split':
-            size_train = int(np.percentile(range(len(all_years)), int(ex['method'][5:])))
-            size_test  = len(all_years) - size_train
+            size_train = int(np.percentile(range(len(ex['all_yrs'])), int(ex['method'][5:])))
+            size_test  = len(ex['all_yrs']) - size_train
             ex['leave_n_years_out'] = size_test
             print('Using {} years to train and {} to test'.format(size_train, size_test))
-            rand_test_years = all_years[-size_test:]
+            rand_test_years = ex['all_yrs'][-size_test:]
         
-        
-    
             
         # test duplicates
         a_conditions_failed = np.logical_and((len(set(rand_test_years)) != ex['leave_n_years_out']),
                                              ex['n'] != ex['n_conv']-1)
         # Update random years to be selected as test years:
     #        initial_years = [yr for yr in initial_years if yr not in random_test_years]
-        rand_train_years = [yr for yr in all_years if yr not in rand_test_years]
+        rand_train_years = [yr for yr in ex['all_yrs'] if yr not in rand_test_years]
         
 
         full_years  = list(Prec_reg.time.dt.year.values)
         RV_years  = list(RV_ts.time.dt.year.values)
         
-    #            RV_dates_train_idx = [i for i in range(len(RV_dates)) if RV_dates[i] in rand_train_years]
         Prec_train_idx = [i for i in range(len(full_years)) if full_years[i] in rand_train_years]
         RV_train_idx = [i for i in range(len(RV_years)) if RV_years[i] in rand_train_years]
-        
         
         Prec_test_idx = [i for i in range(len(full_years)) if full_years[i] in rand_test_years]
         RV_test_idx = [i for i in range(len(RV_years)) if RV_years[i] in rand_test_years]
@@ -633,26 +645,29 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         
         test_years = [yr for yr in list(set(RV_years)) if yr in rand_test_years]
         
-        ave_events_pyr = (len(event_train) + len(event_test))/len(all_years)
+        ave_events_pyr = (len(event_train) + len(event_test))/len(ex['all_yrs'])
         exp_events     = int(ave_events_pyr) * len(rand_test_years)
         tolerance      = 0.5 * exp_events
         diff           = abs(len(event_test) - exp_events)
         
-        print('{}: test year is {}, with {} events'.format(ex['n'], test_years, len(event_test)))
+        
         if diff > tolerance and ex['method'][:6] == 'random' and ex['n'] != ex['n_conv']-1: 
-            print('not a representative sample, drawing new sample')
+            print('not a representative sample drawn, drawing new sample')
             a_conditions_failed = True
+        else:
+            print('{}: test year is {}, with {} events'.format(ex['n'], test_years, len(event_test)))
         if count == 5:
             a_conditions_failed = False
                    
     ex['tested_yrs'].append(test_years)
+    ex['n_events'].append(len(event_test))
     
     train = dict( {    'RV'             : RV_train,
                        'Prec_train_idx' : Prec_train_idx})
     test = dict( {     'RV'             : RV_test,
                        'Prec_test_idx'  : Prec_test_idx})
     #%%
-    return train, test, test_years
+    return train, test, ex
 
 def filter_autocorrelation(ds_Sem, ex):
     n_lags = len(ex['lags'])
@@ -1214,7 +1229,7 @@ def time_mean_bins(xarray, ex):
         pass
     fit_steps_yr = (one_yr.size)  / ex['tfreq']
     bins = list(np.repeat(np.arange(0, fit_steps_yr), ex['tfreq']))
-    n_years = (datetime.year[-1] - datetime.year[0]) + 1
+    n_years = np.unique(datetime.year).size
     for y in np.arange(1, n_years):
         x = np.repeat(np.arange(0, fit_steps_yr), ex['tfreq'])
         x = x + fit_steps_yr * y
@@ -1378,7 +1393,7 @@ def rolling_mean_xr(xarray, win):
 
     return new_xarray
 
-def rolling_mean_time(xarray_or_file, ex, center):
+def rolling_mean_time(xarray_or_file, ex, center=True):
     #%%
 #    xarray_or_file = Prec_reg
 #    array = np.zeros(60)
@@ -1401,19 +1416,22 @@ def rolling_mean_time(xarray_or_file, ex, center):
         # meaning that we are taking the mean over the past at the index/label 
         xr_rolling_mean = xarray_or_file.rolling(time=ex['rollingmean'][1], center=True, 
                                                  min_periods=1).mean(dim='time')
-        lat = 35
-        lon = 360-20
-        
-        def find_nearest(array, value):
-            idx = (np.abs(array - value)).argmin()
-            return int(idx)
-        
-        lat_idx = find_nearest(xarray_or_file['latitude'], lat)
-        lon_idx = find_nearest(xarray_or_file['longitude'], lon)
-        
-        
-        singlegc = xarray_or_file.isel(latitude=lat_idx, 
-                                      longitude=lon_idx) 
+        if 'latitude' in xarray_or_file.dims:
+            lat = 35
+            lon = 360-20
+            
+            def find_nearest(array, value):
+                idx = (np.abs(array - value)).argmin()
+                return int(idx)
+            
+            lat_idx = find_nearest(xarray_or_file['latitude'], lat)
+            lon_idx = find_nearest(xarray_or_file['longitude'], lon)
+            
+            
+            singlegc = xarray_or_file.isel(latitude=lat_idx, 
+                                          longitude=lon_idx) 
+        else:
+            singlegc = xarray_or_file
 
         if type(singlegc) == type(xr.Dataset()):
             singlegc = singlegc.to_array().squeeze()
@@ -1423,9 +1441,11 @@ def rolling_mean_time(xarray_or_file, ex, center):
         dates = pd.to_datetime(singlegc_oneyr.time.values)
         plt.figure(figsize=(10,6))
         plt.plot(dates, singlegc_oneyr.squeeze())
-
-        singlegc = xr_rolling_mean.isel(latitude=lat_idx, 
-                                      longitude=lon_idx) 
+        if 'latitude' in xarray_or_file.dims:
+            singlegc = xr_rolling_mean.isel(latitude=lat_idx, 
+                                          longitude=lon_idx) 
+        else:
+            singlegc = xr_rolling_mean
         if type(singlegc) == type(xr.Dataset()):
             singlegc = singlegc.to_array().squeeze()
         singlegc_oneyr = singlegc.where(singlegc.time.dt.year == year).dropna(dim='time', how='all')
@@ -1583,6 +1603,8 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     it will also start to cluster together regions with similar coordinates.
     '''
     #%%
+    if ex['n_conv'] < 30:
+        grouping = 'group_across_test_and_lags'
 #    grouping = 'group_accros_tests_single_lag'
 #    grouping =  'group_across_test_and_lags'
     # Precursor Regions Dimensions
@@ -1650,17 +1672,19 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     
     if grouping == 'group_across_test_and_lags':
         # Group Similar Precursor Regions Together
+        min_s = np.nanmax(PRECURSOR_DATA)
         precursor_coordinates_index = np.array([index for index, coord in precursor_coordinates])
         precursor_coordinates_coord = np.array([coord for index, coord in precursor_coordinates])
 
-        precursor_coordinates_group = DBSCAN(eps=eps).fit_predict(precursor_coordinates_coord) + 2
+        precursor_coordinates_group = DBSCAN(min_samples=min_s, eps=eps).fit_predict(precursor_coordinates_coord) + 2
         
         
         precursor_indices_new = np.zeros_like(precursor_indices)
         for (year_idx, lag_idx, region_idx), group in zip(precursor_coordinates_index, precursor_coordinates_group):
     #        print(year_idx, lag_idx, region_idx, group)
             precursor_indices_new[year_idx, lag_idx, precursor_indices[year_idx, lag_idx] == region_idx] = group
-    
+        precursor_indices_new[precursor_indices_new==0.] = np.nan
+        
     
     # replace values in PRECURSOR_DATA
     PRECURSOR_DATA[:,:,:,:] = precursor_indices_new[:,:,:,:]
@@ -1669,8 +1693,8 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     
     l_ds_new = []
     for test_idx in range(PRECURSOR_N_TEST_SETS):
-        single_ds = l_ds[test_idx]
-        pattern   = single_ds['pat_num_CPPA']
+        single_ds = l_ds[test_idx].copy()
+        pattern   = single_ds['pat_num_CPPA'].copy()
         
         pattern.values = PRECURSOR_DATA[test_idx]
 #        # set the rest to nan
@@ -1688,6 +1712,43 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     ex['max_N_regs'] = int(np.nanmax(PRECURSOR_DATA))
     #%%
     return l_ds_new, ex
+
+
+
+def plot_precursor_regions(l_ds, n_tests, key_pattern_num, lags, subtitles, ex):
+  
+    if len(lags) > 2:
+        adjust_vert_cbar = 0.0
+    elif len(lags) < 2:
+        adjust_vert_cbar = -0.06
+    
+    for n in np.linspace(0, ex['n_conv']-1, n_tests, dtype=int): 
+        subfolder = os.path.join('', 'intermediate_results')
+        years = ex['tested_yrs']
+        yr = years[n]
+    
+        pattern_num_init = l_ds[n][key_pattern_num].sel(lag=lags) 
+        pattern_num_init.attrs['title'] = ('Precursor Regions - test yr(s): {}'.format(yr ))
+        file_name = '{}_{}_{}_{}'.format(key_pattern_num, lags, n, yr )
+        filename = os.path.join(subfolder, file_name.replace(
+                                ' ','_')+'.png')
+        for_plt = pattern_num_init.copy()
+        for_plt.values = for_plt.values-0.5
+        
+        if 'max_N_regs' not in ex.keys():
+            ex['max_N_regs'] = int(for_plt.max() + 0.5)
+        
+        kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
+                       'steps' : ex['max_N_regs']+1, 'subtitles': subtitles,
+                       'vmin' : 0, 'vmax' : ex['max_N_regs'], 
+                       'cmap' : plt.cm.tab20, 'column' : 1,
+                       'cbar_vert' : adjust_vert_cbar, 'cbar_hght' : 0.0,
+                       'adj_fig_h' : 1., 'adj_fig_w' : 1., 
+                       'hspace' : 0.2, 'wspace' : 0.08,
+                       'cticks_center' : True} )
+        
+        plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
+
 
 def get_area(ds):
     longitude = ds.longitude
@@ -1923,7 +1984,7 @@ def plotting_wrapper(plotarr, ex, filename=None,  kwrgs=None):
         kwrgs['title'] = plotarr.attrs['title']
         
     if filename != None:
-        file_name = os.path.join(ex['figpathbase'], filename)
+        file_name = os.path.join(folder_name, filename)
         kwrgs['savefig'] = True
     else:
         kwrgs['savefig'] = False
@@ -1945,7 +2006,8 @@ def finalfigure(xrdata, file_name, kwrgs):
     figwidth = g.fig.get_figwidth() ; figheight = g.fig.get_figheight()
 
     lon_tick = xrdata.longitude.values
-#    lon_tick[lon_tick > 180] -= 360
+    dg = abs(lon_tick[1] - lon_tick[0])
+    periodic = (np.arange(0, 360, dg).size - lon_tick.size) < 1
     
     longitude_labels = np.linspace(np.min(lon_tick), np.max(lon_tick), 6, dtype=int)
     longitude_labels = np.array(sorted(list(set(np.round(longitude_labels, -1)))))
@@ -1974,12 +2036,16 @@ def finalfigure(xrdata, file_name, kwrgs):
     for n_ax in np.arange(0,n_plots):
         ax = g.axes.flatten()[n_ax]
 #        print(n_ax)
-        plotdata = extend_longitude(xrdata[n_ax]).squeeze().drop('ds')
+        if periodic == True:
+            plotdata = extend_longitude(xrdata[n_ax]).squeeze().drop('ds')
+        else:
+            plotdata = xrdata[n_ax].squeeze()
         im = plotdata.plot.pcolormesh(ax=ax, cmap=cmap,
                                transform=ccrs.PlateCarree(),
                                subplot_kws={'projection': map_proj},
                                 levels=clevels, add_colorbar=False)
-        ax.coastlines(color='black', alpha=0.5)
+        ax.coastlines(color='black', alpha=0.3, facecolor='grey')
+        ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
         
         ax.set_extent([lons[0], lons[-1], lats[0], lats[-1]], ccrs.PlateCarree())
         if kwrgs['subtitles'] == None:
@@ -2021,7 +2087,11 @@ def finalfigure(xrdata, file_name, kwrgs):
         else:
             pass
         
-    g.fig.text(0.5, 0.99, kwrgs['title'], fontsize=20,
+    if 'title_h' in kwrgs.keys():
+        title_height = kwrgs['title_h']
+    else:
+        title_height = 0.98
+    g.fig.text(0.5, title_height, kwrgs['title'], fontsize=20,
                fontweight='heavy', transform=g.fig.transFigure,
                horizontalalignment='center',verticalalignment='top')
     
@@ -2056,7 +2126,7 @@ def finalfigure(xrdata, file_name, kwrgs):
     else:
         cnorm = clevels
 
-    norm = colors.BoundaryNorm(boundaries=cnorm, ncolors=256)
+    norm = mpl.colors.BoundaryNorm(boundaries=cnorm, ncolors=256)
     cbar = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap, orientation='horizontal', 
                  extend=extend, ticks=cnorm, norm=norm)
     cbar = plt.colorbar(im, cbar_ax, cmap=cmap, orientation='horizontal', 

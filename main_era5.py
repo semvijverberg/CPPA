@@ -12,7 +12,7 @@ if os.path.isdir("/Users/semvijverberg/surfdrive/"):
     data_base_path = basepath
 else:
     basepath = "/home/semvij/"
-    data_base_path = "/p/projects/gotham/semvij/"
+    data_base_path = "/p/tmp/semvij/ECE"
 os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
 sys.path.append(script_dir)

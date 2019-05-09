@@ -10,9 +10,9 @@ import xarray as xr
 import numpy as np
 import pandas as pd
 import func_CPPA
-import statsmodels.api as sm
 import cartopy.crs as ccrs
 import itertools
+#import statsmodels.api as sm
 #import scipy as sp
 #import seaborn as sns
 #import matplotlib.pyplot as plt

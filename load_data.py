@@ -118,3 +118,5 @@ def load_data(ex):
     #%%
     return RV_ts, Prec_reg, ex
 
+
+

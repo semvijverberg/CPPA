@@ -25,7 +25,7 @@ def load_data(ex):
     print('\nimportRV_1dts is true, so the 1D time serie given with name \n'
               '{} is imported.'.format(ex['RVts_filename']))
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-    dicRV = np.load(filename,  encoding='latin1').item()
+    dicRV = np.load(filename,  encoding='latin1', allow_pickle=True).item()
     try:    
         RVtsfull = dicRV['RVfullts95']
     except:

@@ -38,10 +38,23 @@ def spatial_cov(ex, key1='spatcov_CPPA'):
         ex['test_year'] = list(set(test['RV'].time.dt.year.values))
         if 'use_ts_logit' not in ex.keys() or ex['use_ts_logit'] == False:
             print('test year(s) {}'.format(ex['test_year']))
+
+        csv_train_test_data = 'testyr{}_{}.csv'.format(ex['test_year'], 0)
+        path = os.path.join(ex['output_ts_folder'], csv_train_test_data)
+        key1test = pd.read_csv(path, index_col='date')[key1]
+        dates = pd.to_datetime(key1test.index)            
+        if n == 0:
+            onlytest = pd.DataFrame(np.zeros( (key1test.index.size) ), 
+                                    index=dates, columns=[key1] )  
                                  
         
         # get RV dates (period analyzed)
-        
+        all_years = list(dates.year)
+        test_idx_full = [i for i in range(len(all_years)) if all_years[i] in ex['test_year']]
+        dates_test_full = dates[test_idx_full]
+        onlytest[key1].loc[dates_test_full] = pd.Series(key1test.iloc[test_idx_full].values,
+                                                        index=dates_test_full)
+                                        
         dates_test = pd.to_datetime(test['RV'].time.values)
         
         for lag_idx, lag in enumerate(ex['lags']):
@@ -79,6 +92,16 @@ def spatial_cov(ex, key1='spatcov_CPPA'):
             else:
                 ex['test_RV'][idx]     = np.concatenate( [ex['test_RV'][idx], test['RV'].values] )  
                 ex['test_yrs'][idx]    = np.concatenate( [ex['test_yrs'][idx], test['RV'].time] )  
+    
+    
+    RVfullts = xr.DataArray(data=onlytest.values.squeeze(), coords=[dates], dims=['time'])
+    filename = '{}_only_test_ts'.format(key1)
+    try:
+        to_dict = dict( { 'mask'      : ex['mask'],
+                     'RVfullts'   : RVfullts} )
+    except:
+        to_dict = dict( {'RVfullts'   : RVfullts} )
+    np.save(os.path.join(ex['output_ts_folder'], filename+'.npy'), to_dict)  
     #%%
     return ex
 

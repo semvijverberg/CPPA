@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
-# %load main_era5.py
 """
 Created on Mon Dec 10 10:31:42 2018
 
@@ -19,11 +12,10 @@ if os.path.isdir("/Users/semvijverberg/surfdrive/"):
     data_base_path = basepath
 else:
     basepath = "/home/semvij/"
-#    data_base_path = "/p/tmp/semvij/ECE"
-    data_base_path = "/p/projects/gotham/semvij"
+    data_base_path = "/p/projects/gotham/semvij/"
 os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
-if script_dir not in sys.path: sys.path.append(script_dir)
+sys.path.append(script_dir)
 if sys.version[:1] == '3':
     from importlib import reload as rel
 
@@ -34,7 +26,6 @@ import matplotlib.pyplot as plt
 import func_CPPA
 import func_pred
 import load_data
-import ROC_score
 from ROC_score import ROC_score_wrapper
 from ROC_score import only_spatcov_wrapper
 from ROC_score import plotting_timeseries
@@ -43,17 +34,72 @@ xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
 
-import init.era5_t2mmax_E_US_sst as settings
-#import init.EC_t2m_E_US as settings
+datafolder = 'era5'
+path_pp  = os.path.join(data_base_path, 'Data_'+datafolder +'/input_pp') # path to netcdfs
+if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 
 
-ex = settings.__init__()
-
-
+# =============================================================================
+# General Settings
+# =============================================================================
+ex = {'datafolder'  :       datafolder,
+      'grid_res'    :       1.0,
+     'startyear'    :       1979,
+     'endyear'      :       2018,
+     'path_pp'      :       path_pp,
+     'startperiod'  :       '06-24', #'1982-06-24',
+     'endperiod'    :       '08-22', #'1982-08-22',
+     'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
+     'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
+     'RVts_filename':       "comp_v_spclus4of4_tempclus2_AgglomerativeClustering_smooth15days_clus1_daily.npy",
+     'RV_name'      :       'v_E-US',
+     'name'         :       'sst',
+     'add_lsm'      :       False,
+     'region'       :       'Northern',
+     'lags'         :       [0, 5, 10, 30], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
+     'plot_ts'      :       True,
+     'exclude_yrs'  :      []
+     }
+# =============================================================================
+# Settings for event timeseries
+# =============================================================================
+ex['tfreq']                 =       1 
+ex['max_break']             =       0   
+ex['min_dur']               =       1
+ex['event_percentile']      =       'std'
+# =============================================================================
+# Settins for precursor / CPPA
+# =============================================================================
+ex['filename_precur']       =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
+                                    ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
+ex['rollingmean']           =       ('RV', 7)
+ex['extra_wght_dur']        =       False
+ex['prec_reg_max_d']        =       1
+ex['SCM_percentile_thres']  =       95
+ex['FCP_thres']             =       0.80
+ex['min_perc_area']         =       0.02 # min size region - in % of total prec area [m2]
+ex['wghts_accross_lags']    =       False
+ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
+ex['days_before']           =       [0, 7, 14]
+ex['store_timeseries']      =       False
+# =============================================================================
+# Settings for validation     
+# =============================================================================
+ex['leave_n_out']           =       True
+ex['ROC_leave_n_out']       =       False
+ex['method']                =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
+ex['n_boot']                =       0
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
 RV_ts, Prec_reg, ex = load_data.load_data(ex)
+
+if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
+    ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 
+ex['exppathbase'] = '{}_{}_{}_{}'.format(datafolder, ex['RV_name'],ex['name'],
+                      ex['region'])
+ex['figpathbase'] = os.path.join(ex['figpathbase'], ex['exppathbase'])
+if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
 
 
 print_ex = ['RV_name', 'name', 'max_break',
@@ -65,7 +111,7 @@ print_ex = ['RV_name', 'name', 'max_break',
             'tfreq', 'lags', 'n_yrs', 'region',
             'rollingmean', 
             'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
-            'min_perc_area', 'prec_reg_max_d', 'distance_eps_init',
+            'min_perc_area', 'prec_reg_max_d', 
             'ROC_leave_n_out', 'method', 'n_boot',
             'RVts_filename', 'path_pp']
 
@@ -81,30 +127,26 @@ def printset(print_ex=print_ex, ex=ex):
 
 
 printset()
-n = 0
+n = 1
 ex['n'] = n ; lag=0
- 
-
-
-# In[ ]:
-
+#%% 
 
 # =============================================================================
 # Run code with ex settings
 # =============================================================================
-#ex['lags'] = [0]; ex['n_boot'] = 0
+
 l_ds_CPPA, ex = func_CPPA.main(RV_ts, Prec_reg, ex)
    
 
 
 # save ex setting in text file
 output_dic_folder = ex['output_dic_folder']
-#if os.path.isdir(output_dic_folder):
-#    answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
-#    if 'n' in answer:
-#        assert (os.path.isdir(output_dic_folder) != True)
-#    elif 'y' in answer:
-#        pass
+if os.path.isdir(output_dic_folder):
+    answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
+    if 'n' in answer:
+        assert (os.path.isdir(output_dic_folder) != True)
+    elif 'y' in answer:
+        pass
 
 if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
 
@@ -130,22 +172,18 @@ with open(txtfile, "w") as text_file:
 
 
 if ex['store_timeseries'] == True:
-    subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
-    total_folder = os.path.join(ex['figpathbase'], subfolder)
-    if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
     if ex['method'] == 'iter': 
         eps = 10
         l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
                          grouping = 'group_accros_tests_single_lag', eps=10)
     if ex['method'][:6] == 'random':
-        eps = 11 ; grouping = 'group_across_test_and_lags'# 'group_accros_tests_single_lag'
-        if ex['datafolder'] == 'EC': eps = 15
+        eps = 11
         l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                         grouping = grouping, eps=eps)
+                         grouping = 'group_across_test_and_lags', eps=eps)
         
     func_CPPA.plot_precursor_regions(l_ds_CPPA, 2, 'pat_num_CPPA', [0], [''], ex)
     print('\n\n\nCheck labelling\n\n\n')
-    func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA_clust', [0], ['0'], ex)
+    func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA_clust', [0], [''], ex)
     
     
     func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
@@ -153,8 +191,8 @@ if ex['store_timeseries'] == True:
     
     ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
     ex = ROC_score_wrapper(ex)
-#    args = ['python output_wrapper.py {}'.format(output_dic_folder)]
-#    func_CPPA.kornshell_with_input(args, ex)
+    args = ['python output_wrapper.py {}'.format(output_dic_folder)]
+    func_CPPA.kornshell_with_input(args, ex)
 
 
 
@@ -165,26 +203,26 @@ if ex['store_timeseries'] == True:
 # =============================================================================
 # Load and Generate output in console
 # =============================================================================
-from ROC_score import SCORE_CLASS
+
 filename = 'output_main_dic'
 dic = np.load(os.path.join(output_dic_folder, filename+'.npy'),  encoding='latin1').item()
+#%%
 # load settings
 ex = dic['ex']
 # load patterns
 l_ds_CPPA = dic['l_ds_CPPA']
-if 'score' in ex.keys():
-    SCORE = ex['score']
-#%%
 
-
-#ex['method']
+#ex['min_perc_area'] = ex['min_perc_prec_area']
+#ex['n_boot'] = 0
+#ex['SCM_percentile_thres'] = ex['perc_map']
+#ex['FCP_thres'] = ex['comp_perc']
 
 
 # write output in textfile
 if 'use_ts_logit' in ex.keys() and 'pval_logit_final' in ex.keys():
     predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
 else:
-    predict_folder = ''
+    predict_folder = 'spatcov_CPPA'
 ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
 main_output = os.path.join(ex['figpathbase'], ex['exp_folder'])
 if os.path.isdir(main_output) != True : os.makedirs(main_output)
@@ -200,6 +238,12 @@ with open(txtfile, "w") as text_file:
         print(printline)
         print(printline, file=text_file)
 
+
+
+
+
+
+#%%
 # =============================================================================
 # perform prediciton        
 # =============================================================================
@@ -225,52 +269,20 @@ if ex['store_timeseries'] == True:
     ex = ROC_score_wrapper(ex)
 else:
     key_pattern_num = 'pat_num_CPPA'
-    ex, SCORE = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-    ex['score'] = SCORE 
-    filename_2 = 'output_main_dic_with_score'
-    to_dict = dict( { 'ex'      :   ex,
-                     'l_ds_CPPA' : l_ds_CPPA} )
-    np.save(os.path.join(output_dic_folder, filename_2+'.npy'), to_dict) 
+    ex = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
 if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
 
+score_AUC       = np.round(ex['score'][-1][0], 2)
+ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
+ROC_boot = [np.round(np.percentile(ex['score'][-1][1][i],99), 2) for i in range(len(ex['lags']))]
 
-#%%
-try:
-    filename_2 = 'output_main_dic_with_score'
-    dic = np.load(os.path.join(output_dic_folder, filename_2+'.npy'),  encoding='latin1').item()
-    # load settings
-    ex = dic['ex']
-    # load patterns
-    l_ds_CPPA = dic['l_ds_CPPA']
-except:
-    pass
-if 'score' in ex.keys():
-    SCORE = ex['score']
+ex['score_AUC']   = score_AUC
+ex['ROC_boot_99'] = ROC_boot
 
-
-
-try:
-    score_AUC       = np.round(SCORE.AUC.mean(0).values, 2)
-    ex['score_AUC']   = score_AUC
-    ROC_str_Sem     = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
-except:
-    ROC_str_Sem     = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
-#ROC_boot = [np.round(np.percentile(SCORE.ROC_boot,95), 2) for i in range(len(ex['lags']))]
-
-
-
-
-
-
-
-#%%
-try:  
-    ROC_score.create_validation_plot([output_dic_folder], metric='AUC')
-    ROC_score.create_validation_plot([output_dic_folder], metric='KSS')
-except:
-    pass
-
-
+filename = 'output_main_dic'
+to_dict = dict( { 'ex'      :   ex,
+                 'l_ds_CPPA' : l_ds_CPPA} )
+np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
 
 #%%
 # =============================================================================
@@ -305,17 +317,13 @@ kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
                    'cmap' : plt.cm.RdBu_r, 'column' : 1} )
 
 mean_n_patterns = patterns_Sem.mean(dim='n_tests')
-mean_n_patterns = mean_n_patterns.where(l_ds_CPPA[n]['pat_num_CPPA']>0.5)
 mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
 mean_n_patterns.attrs['title'] = 'CPPA - Precursor Pattern'
-try:
-    mean_n_patterns.name = 'ROC {}'.format(score_AUC)
-except:
-    mean_n_patterns.name = '' 
+mean_n_patterns.name = 'ROC {}'.format(score_AUC)
 filename = os.path.join('', 'mean_over_{}_tests'.format(ex['n_conv']) )
 func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
-
+print(ROC_boot)
 
 
 #%% Robustness accross training sets
@@ -387,7 +395,6 @@ if ex['leave_n_out']:
                    'title_h' : 0.95} )
     # weighted by persistence (all years == wgt of 1, less is below 1)
     mean_n_patterns = patterns_Sem.mean(dim='n_tests') * wghts/np.max(wghts)
-    mean_n_patterns = mean_n_patterns.where(wghts!=0.)
     mean_n_patterns['lag'] = ROC_str_Sem
 
     title = 'Precursor Pattern'
@@ -475,17 +482,13 @@ if ex['method'] == 'iter':
 
 
 #%% Initial regions from only composite extraction:
-key_pattern_num = 'pat_num_CPPA_clust'
 
 lags = ex['lags']
 if ex['leave_n_out']:
     subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
     total_folder = os.path.join(ex['figpathbase'], subfolder)
     if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-    if 'ROC_str_Sem' in globals():
-        subtitles = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
-    else:
-        subtitles = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
+    subtitles = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
     
         
     func_CPPA.plot_precursor_regions(l_ds_CPPA, ex['n_conv'], key_pattern_num, lags, subtitles, ex)
@@ -499,97 +502,3 @@ for i, yr in enumerate(ex['all_yrs']):
 #pd.DataFrame(ex['test_RV'][0]).plot.kde(bw_method=0.1)
 #pd.DataFrame(ex['test_RV'][0]*ex['test_ts_prec'][0]).plot()
 #pd.DataFrame(ex['test_ts_prec'][0]).plot()
-
-
-# # End of code
-
-# In[ ]:
-
-
-# %run func_CPPA.py
-# rel(func_CPPA)
-
-
-
-# if (ex['method'] == 'no_train_test_split') : ex['n_conv'] = 1
-# if ex['method'][:5] == 'split' : ex['n_conv'] = 1
-# if ex['method'][:6] == 'random' : ex['n_conv'] = int(ex['n_yrs'] / int(ex['method'][6:]))
-# if ex['method'] == 'iter': ex['n_conv'] = ex['n_yrs'] 
-
-
-# if ex['ROC_leave_n_out'] == True or ex['method'] == 'no_train_test_split': 
-#     print('leave_n_out set to False')
-#     ex['leave_n_out'] = False
-# else:
-#     ex['tested_yrs'] = []
-
-
-# rmwhere, window = ex['rollingmean']
-# if rmwhere == 'all' and window != 1:
-#     Prec_reg = rolling_mean_time(Prec_reg, ex, center=False)
-
-# train_test_list  = []
-# l_ds_CPPA        = []  
-# n = 0
-# train_all_test_n_out = (ex['ROC_leave_n_out'] == True) & (n==0) 
-# ex['n'] = n
-# # do single run    
-# # =============================================================================
-# # Create train test set according to settings 
-# # =============================================================================
-# train, test, ex = train_test_wrapper(RV_ts, Prec_reg, ex)  
-
-# Prec_train = Prec_reg.isel(time=train['Prec_train_idx'])
-# # Prec_train = Prec_train.astype('float64')
-# lats = Prec_train.latitude
-# lons = Prec_train.longitude
-
-# array = np.zeros( (len(ex['lags']), len(lats), len(lons)) )
-# pattern_CPPA = xr.DataArray(data=array, coords=[ex['lags'], lats, lons], 
-#                       dims=['lag','latitude','longitude'], name='communities_composite',
-#                       attrs={'units':'Kelvin'})
-
-
-# array = np.zeros( (len(ex['lags']), len(lats), len(lons)) )
-# pat_num_CPPA = xr.DataArray(data=array, coords=[ex['lags'], lats, lons], 
-#                       dims=['lag','latitude','longitude'], name='commun_numb_init', 
-#                       attrs={'units':'Precursor regions'})
-
-# array = np.empty( (len(ex['lags']), len(lats), len(lons)) )
-# std_train_min_lag = xr.DataArray(data=array, coords=[ex['lags'], lats, lons], 
-#                       dims=['lag','latitude','longitude'], name='std_train_min_lag', 
-#                       attrs={'units':'std [-]'})
-
-# pat_num_CPPA.name = 'commun_numbered'
-
-# weights     = pattern_CPPA.copy()
-# weights.name = 'weights'
-
-
-# RV_event_train = Ev_timeseries(train['RV'], ex['event_thres'], ex)[0]
-# RV_event_train = pd.to_datetime(RV_event_train.time.values)
-
-# RV_dates_train = pd.to_datetime(train['RV'].time.values)
-# all_yrs_set = list(set(RV_dates_train.year.values))
-# comp_years = list(RV_event_train.year.values)
-# mask_chunks = get_chunks(all_yrs_set, comp_years, ex)
-# lag = 0
-
-# idx = ex['lags'].index(lag)
-
-# events_min_lag = func_dates_min_lag(RV_event_train, lag)[1]
-# dates_train_min_lag = func_dates_min_lag(RV_dates_train, lag)[1]
-# event_idx = [list(dates_train_min_lag.values).index(E) for E in events_min_lag.values]
-# binary_events = np.zeros(RV_dates_train.size)    
-# binary_events[event_idx] = 1
-
-
-
-
-
-# std_train_min_lag[idx] = Prec_train.where(Prec_train.mask==False).sel(time=dates_train_min_lag).std(dim='time', skipna=True)
-# #%%
-# # extract precursor regions composite approach
-# # composite_p1, xrnpmap_p1, wghts_at_lag = extract_regs_p1(Prec_train, mask_chunks, events_min_lag, 
-# #                                      dates_train_min_lag, std_train_lag, ex)  
-

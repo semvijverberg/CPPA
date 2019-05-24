@@ -14,14 +14,14 @@ Created on Mon Dec 10 10:31:42 2018
 import os, sys
 
 
-if os.path.isdir("/Users/semvijverberg/surfdrive/"):
-    basepath = "/Users/semvijverberg/surfdrive/"
-    data_base_path = basepath
-else:
-    basepath = "/home/semvij/"
-#    data_base_path = "/p/tmp/semvij/ECE"
-    data_base_path = "/p/projects/gotham/semvij"
-os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
+#if os.path.isdir("/Users/semvijverberg/surfdrive/"):
+#    basepath = "/Users/semvijverberg/surfdrive/"
+#    data_base_path = basepath
+#else:
+#    basepath = "/home/semvij/"
+##    data_base_path = "/p/tmp/semvij/ECE"
+#    data_base_path = "/p/projects/gotham/semvij"
+#os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
 sys.path.append(script_dir)
 if sys.version[:1] == '3':
@@ -34,6 +34,7 @@ import matplotlib.pyplot as plt
 import func_CPPA
 import func_pred
 import load_data
+import ROC_score
 from ROC_score import ROC_score_wrapper
 from ROC_score import only_spatcov_wrapper
 from ROC_score import plotting_timeseries
@@ -42,68 +43,9 @@ xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
 
-datafolder = 'era5'
-path_pp  = os.path.join(data_base_path, 'Data_'+datafolder +'/input_pp') # path to netcdfs
-if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
+import init.era5_t2mmax as settings
 
-
-# =============================================================================
-# General Settings
-# =============================================================================
-ex = {'datafolder'  :       datafolder,
-      'grid_res'    :       1.0,
-     'startyear'    :       1979,
-     'endyear'      :       2018,
-     'path_pp'      :       path_pp,
-     'startperiod'  :       '06-24', #'1982-06-24',
-     'endperiod'    :       '08-22', #'1982-08-22',
-     'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
-     'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-     'RVts_filename':       "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4.npy", #"heatwave_ECE.csv"
-     'RV_name'      :       'T2mmax',
-     'name'         :       'sst',
-     'add_lsm'      :       False,
-     'region'       :       'Northern',
-     'lags'         :       [0, 5, 10, 30], #[0, 5, 10, 15, 20, 30, 40, 50, 60], #[5, 15, 30, 50] #[10, 20, 30, 50] 
-     'plot_ts'      :       True,
-     'exclude_yrs'  :      []
-     }
-# =============================================================================
-# Settings for event timeseries
-# =============================================================================
-ex['tfreq']                 =       1 
-ex['max_break']             =       0   
-ex['min_dur']               =       1
-ex['event_percentile']      =       'std'
-# =============================================================================
-# Settins for precursor / CPPA
-# =============================================================================
-if datafolder=="era5" or datafolder=="ERAint":
-    ex['filename_precur']   =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
-                                        ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
-elif datafolder=="ECE":
-    ex['filename_precur']   =       "merged_s12.nc"
-
-    
-    
-ex['rollingmean']           =       ('RV', 1)
-ex['extra_wght_dur']        =       False
-ex['prec_reg_max_d']        =       1
-ex['SCM_percentile_thres']  =       95
-ex['FCP_thres']             =       0.80
-ex['min_perc_area']         =       0.02 # min size region - in % of total prec area [m2]
-ex['wghts_accross_lags']    =       False
-ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
-ex['days_before']           =       [0, 7, 14]
-ex['store_timeseries']      =       False
-# =============================================================================
-# Settings for validation     
-# =============================================================================
-ex['leave_n_out']           =       True
-ex['ROC_leave_n_out']       =       False
-ex['method']                =       'iter' #'iter' or 'no_train_test_split' or split#8 or random3  
-ex['n_boot']                =       0
-
+ex = settings.__init__()
 
 # In[ ]:
 
@@ -115,7 +57,7 @@ RV_ts, Prec_reg, ex = load_data.load_data(ex)
 
 if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
     ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 
-ex['exppathbase'] = '{}_{}_{}_{}'.format(datafolder, ex['RV_name'],ex['name'],
+ex['exppathbase'] = '{}_{}_{}_{}'.format(ex['datafolder'], ex['RV_name'],ex['name'],
                       ex['region'])
 ex['figpathbase'] = os.path.join(ex['figpathbase'], ex['exppathbase'])
 if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
@@ -130,7 +72,7 @@ print_ex = ['RV_name', 'name', 'max_break',
             'tfreq', 'lags', 'n_yrs', 'region',
             'rollingmean', 
             'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
-            'min_perc_area', 'prec_reg_max_d', 
+            'min_perc_area', 'prec_reg_max_d', 'distance_eps_init',
             'ROC_leave_n_out', 'method', 'n_boot',
             'RVts_filename', 'path_pp']
 
@@ -146,9 +88,9 @@ def printset(print_ex=print_ex, ex=ex):
 
 
 printset()
-n = 1
+n = 0
 ex['n'] = n ; lag=0
-#%% 
+ 
 
 
 # In[ ]:
@@ -164,12 +106,12 @@ l_ds_CPPA, ex = func_CPPA.main(RV_ts, Prec_reg, ex)
 
 # save ex setting in text file
 output_dic_folder = ex['output_dic_folder']
-if os.path.isdir(output_dic_folder):
-    answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
-    if 'n' in answer:
-        assert (os.path.isdir(output_dic_folder) != True)
-    elif 'y' in answer:
-        pass
+#if os.path.isdir(output_dic_folder):
+#    answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
+#    if 'n' in answer:
+#        assert (os.path.isdir(output_dic_folder) != True)
+#    elif 'y' in answer:
+#        pass
 
 if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
 
@@ -195,18 +137,21 @@ with open(txtfile, "w") as text_file:
 
 
 if ex['store_timeseries'] == True:
+    subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
+    total_folder = os.path.join(ex['figpathbase'], subfolder)
+    if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
     if ex['method'] == 'iter': 
         eps = 10
         l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
                          grouping = 'group_accros_tests_single_lag', eps=10)
     if ex['method'][:6] == 'random':
-        eps = 11
+        eps = 10 ; grouping = 'group_accros_tests_single_lag'
         l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                         grouping = 'group_across_test_and_lags', eps=eps)
+                         grouping = grouping, eps=eps)
         
     func_CPPA.plot_precursor_regions(l_ds_CPPA, 2, 'pat_num_CPPA', [0], [''], ex)
     print('\n\n\nCheck labelling\n\n\n')
-    func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA_clust', [0], [''], ex)
+    func_CPPA.plot_precursor_regions(l_ds_CPPA, 4, 'pat_num_CPPA_clust', [0, 50], ['0', '50'], ex)
     
     
     func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
@@ -218,7 +163,7 @@ if ex['store_timeseries'] == True:
     func_CPPA.kornshell_with_input(args, ex)
 
 
-# In[ ]:
+
 
 
 #%% 
@@ -229,16 +174,14 @@ if ex['store_timeseries'] == True:
 
 filename = 'output_main_dic'
 dic = np.load(os.path.join(output_dic_folder, filename+'.npy'),  encoding='latin1').item()
-#%%
 # load settings
 ex = dic['ex']
 # load patterns
 l_ds_CPPA = dic['l_ds_CPPA']
+#%%
 
-#ex['min_perc_area'] = ex['min_perc_prec_area']
-#ex['n_boot'] = 0
-#ex['SCM_percentile_thres'] = ex['perc_map']
-#ex['FCP_thres'] = ex['comp_perc']
+
+#ex['method']
 
 
 # write output in textfile
@@ -261,12 +204,6 @@ with open(txtfile, "w") as text_file:
         print(printline)
         print(printline, file=text_file)
 
-
-
-
-
-
-#%%
 # =============================================================================
 # perform prediciton        
 # =============================================================================
@@ -292,15 +229,28 @@ if ex['store_timeseries'] == True:
     ex = ROC_score_wrapper(ex)
 else:
     key_pattern_num = 'pat_num_CPPA'
-    ex = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+    ex, SCORE = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
 if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
 
-score_AUC       = np.round(ex['score'][-1][0], 2)
-ROC_str_Sem      = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
-ROC_boot = [np.round(np.percentile(ex['score'][-1][1][i],99), 2) for i in range(len(ex['lags']))]
 
-ex['score_AUC']   = score_AUC
-ex['ROC_boot_99'] = ROC_boot
+
+try: 
+    ex['score'] = SCORE 
+    ROC_score.create_validation_plot([output_dic_folder])
+except:
+    pass
+try:
+    score_AUC       = np.round(SCORE.AUC.mean(0).values, 2)
+    ex['score_AUC']   = score_AUC
+    ROC_str_Sem     = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
+except:
+    ROC_str_Sem     = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
+#ROC_boot = [np.round(np.percentile(SCORE.ROC_boot,95), 2) for i in range(len(ex['lags']))]
+
+
+
+
+
 
 filename = 'output_main_dic'
 to_dict = dict( { 'ex'      :   ex,
@@ -342,11 +292,14 @@ kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
 mean_n_patterns = patterns_Sem.mean(dim='n_tests')
 mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
 mean_n_patterns.attrs['title'] = 'CPPA - Precursor Pattern'
-mean_n_patterns.name = 'ROC {}'.format(score_AUC)
+try:
+    mean_n_patterns.name = 'ROC {}'.format(score_AUC)
+except:
+    mean_n_patterns.name = '' 
 filename = os.path.join('', 'mean_over_{}_tests'.format(ex['n_conv']) )
 func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
-print(ROC_boot)
+
 
 
 #%% Robustness accross training sets

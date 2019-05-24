@@ -14,40 +14,251 @@ import func_CPPA
 import xarray as xr
 import matplotlib.pyplot as plt
 import seaborn as sns
+import statsmodels.formula.api as sm
+from sklearn.metrics import roc_auc_score
+
+
+class SCORE_CLASS():
+    
+    def __init__(self, ex):
+        self.method         = ex['method']
+        self.fold           = (ex['method'][:6]=='random'
+                               and ex['method'][-4:]=='fold')
+        self.all_test       = (ex['leave_n_out'] == True 
+                               and ex['method'] == 'iter'
+                               or ex['ROC_leave_n_out']
+                               or (ex['method'][:6]=='random'
+                               and ex['method'][-4:]!='fold'))
+        self.notraintest    = (ex['leave_n_out'] == False
+                               or ex['method'][:5] == 'split')
+        self.n_boot         = ex['n_boot']
+        self._n_conv        = ex['n_conv']
+        self._lags          = ex['lags']
+        
+        if self.fold: shape = (self._n_conv, len(ex['lags']) )
+        if self.fold==False or self.notraintest: shape = (1, len(ex['lags']) )
+        
+        
+        self.ROC_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )
+
+        self.RV_test        = pd.DataFrame(data=np.zeros( (ex['dates_RV'].size, len(ex['lags']) ) ), 
+                                           columns=ex['lags'], 
+                                           index = ex['dates_RV'])
+        self.y_true_test        = pd.DataFrame(data=np.zeros( (ex['dates_RV'].size, len(ex['lags']) ) ), 
+                                               columns=ex['lags'], 
+                                           index = ex['dates_RV'])
+        self.Prec_test      = pd.DataFrame(data=np.zeros( (ex['dates_RV'].size, len(ex['lags']) ) ), 
+                                           columns=ex['lags'], 
+                                           index = ex['dates_RV']) 
+        self.logit_test     = pd.DataFrame(data=np.zeros( (ex['dates_RV'].size, len(ex['lags']) ) ), 
+                                           columns=ex['lags'], 
+                                           index = ex['dates_RV']) 
+        # training data is different every train test set.
+        trainsize = ex['train_test_list'][0][0]['RV'].size
+        shape_train          = (self._n_conv, len(ex['lags']), trainsize ) 
+        self.RV_train        = np.zeros( shape_train )
+        self.y_true_train    = np.zeros( shape_train )
+        self.Prec_train      = np.zeros( shape_train )
+                
+        
+
+        
+        self.AUC  = pd.DataFrame(data=np.zeros( shape ), 
+                                     columns=ex['lags'])
+        self.KSS  = pd.DataFrame(data=np.zeros( shape ), 
+                                     columns=ex['lags'])
+        self.ROC_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )
+        self.KSS_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )
+        self.FP_TP    = np.zeros( shape , dtype=list )
+        
+        shape_stat = (self._n_conv, len(ex['lags']) )
+        self.logitmodel         = np.empty( shape_stat, dtype=list ) 
+        self.RV_thresholds      = np.zeros( shape_stat )
+        self.Prec_train_mean    = np.zeros( shape_stat )
+        self.Prec_train_std     = np.zeros( shape_stat )
+        self.Prec_test_mean     = np.zeros( shape_stat )
+        self.Prec_test_std      = np.zeros( shape_stat )
+        pthresholds             = np.linspace(1, 9, 9, dtype=int)
+        data = np.empty( (shape_stat[0], shape_stat[1], pthresholds.size)  )
+        self.xrpercentiles = xr.DataArray(data=data, 
+                                          coords=[range(shape_stat[0]), ex['lags'], pthresholds], 
+                                          dims=['n_tests', 'lag','percentile'], 
+                                          name='percentiles') 
+    @property
+    def get_pvalue_AUC(self):
+        pvalue = np.zeros( (self._n_conv, len(self._lags)) )
+        for n in range(self._n_conv):
+            for l, lag in enumerate(self._lags):
+                rand = self.ROC_boot[n, l, :]
+                AUC  = self.AUC.iloc[n, l]
+                pvalue[n,l] = rand[rand > AUC].size / rand.size
+        return pvalue
+
+    @property
+    def get_pvalue_KSS(self):
+        pvalue = np.zeros( (self._n_conv, len(self._lags)) )
+        for n in range(self._n_conv):
+            for l, lag in enumerate(self._lags):
+                rand = self.KSS_boot[n, l, :]
+                KSS  = self.KSS.iloc[n, l]
+                pvalue[n,l] = rand[rand > KSS].size / rand.size
+        return pvalue
+
+    @property
+    def get_mean_pvalue_KSS(self):
+        pvalue = np.zeros( (len(self._lags)) )
+        for l, lag in enumerate(self._lags):
+            rand = np.concatenate(self.KSS_boot[:, l, :], axis=0)
+            KSS  = np.median(self.KSS.iloc[:, l], axis=0)
+            pvalue[l] = rand[rand > KSS].size / rand.size
+        return pvalue
+
+    @property
+    def get_mean_pvalue_AUC(self):
+        pvalue = np.zeros( (len(self._lags)) )
+        for l, lag in enumerate(self._lags):
+            rand = np.concatenate(self.ROC_boot[:, l, :], axis=0)
+            AUC  = np.median(self.AUC.iloc[:, l], axis=0)
+            pvalue[l] = rand[rand > AUC].size / rand.size
+        return pvalue
+    
+    @property
+    def get_AUC_spatcov(self):
+        for lag in self._lags:
+            AUC_sklearn(self.y_true_test[lag], self.Prec_test[lag], n_bootstraps=5)
+    
+                
 
 def only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
     #%%
-    ex['score'] = []
+    # init class
+    SCORE = SCORE_CLASS(ex)
+    
+    
     ex['test_ts_prec'] = np.zeros( len(ex['lags']) , dtype=list)
     ex['test_RV'] = np.zeros( len(ex['lags']) , dtype=list)
     for n in range(len(ex['train_test_list'])):
         ex['n'] = n
+#        ex['test_year'] = list(set(test['RV'].time.dt.year.values))
+
+       
         
-        test =ex['train_test_list'][n][1]
-        ex['test_year'] = list(set(test['RV'].time.dt.year.values))
-        
+        test  = ex['train_test_list'][n][1]
+        train = ex['train_test_list'][n][0]
+        RV_ts_train = train['RV']
+        Prec_train_idx = train['Prec_train_idx']
+        Prec_train_reg = Prec_reg.isel(time=Prec_train_idx)
         
         ds_Sem = l_ds_CPPA[n]
         
+        get_statistics_train(RV_ts_train, ds_Sem, Prec_train_reg, SCORE, ex)
         
-        ex = ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex)
+    
+        
+        Prec_test_reg = Prec_reg.isel(time=test['Prec_test_idx'])
+        ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex)
+#    ex['score'] = 
     #%%
-    return ex
+    return ex, SCORE
 
-def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
+
+def create_validation_plot(outdic_folders, metric='AUC'):
+#    from time_series_analysis import subplots_df
+    #%%
+    # each folder will become a single df to plot
+    import numpy as np, scipy.stats as st
+    from scipy.stats import kstest
+    from scipy.stats import ks_2samp
+    # ks_2samp(scorecl.AUC[lag], ROC_array[-1])
+    scoreclasses  = {}
+    df_series     = []
+    datasets      = []
+    for folder in outdic_folders:
+        filename = 'output_main_dic'
+        dic = np.load(os.path.join(folder, filename+'.npy'),  encoding='latin1').item()
+        ex = dic['ex']
+        scoreclasses[ex['datafolder']] = ex['score']
+        df_series.append( ex['score'].AUC.mean(0).values )
+        datasets.append( ex['datafolder'] )
+    df = pd.DataFrame(np.concatenate(np.array(df_series)[None,:], axis=0),
+                      index=datasets, columns=ex['lags'])
+
+    if metric == 'AUC':
+        y_lim = (0.3,1)
+    elif metric == 'KSS':    
+        y_lim = (-1,1)
+    lags_f = np.array(ex['lags']) - 0.5
+    lags_s = np.array(ex['lags']) + 0.5
+    g = sns.FacetGrid(df, row=len(datasets)-1, size=7, aspect=1.4,
+                      ylim=y_lim)
+    for i, ax in enumerate(g.axes.flatten()):
+        name = datasets[0]
+        scorecl = scoreclasses[name]
+        if metric == 'AUC':
+            score_metric = scorecl.AUC
+            boot = scorecl.ROC_boot
+        elif metric == 'KSS':
+            score_metric = scorecl.KSS
+            boot = scorecl.KSS_boot
+        
+        
+        
+        # random shuffle
+        conf_int = np.empty( (2, len(ex['lags']) ) )
+        if boot.size!=0:
+            ROC_array = np.zeros( (len(ex['lags']),boot.shape[0]*boot.shape[2]) )
+            for l, lag in enumerate(ex['lags']):
+
+                ROC_array[l] = np.concatenate(boot[:,l,:], axis=0)
+                a = ROC_array[l]
+                con = st.t.interval(0.95, len(a)-1, loc=np.mean(a), scale=st.sem(a))
+                conf_int[:,l] = con
+            ax.fill_between(ex['lags'], conf_int[0], conf_int[1], linestyle='solid', 
+                        edgecolor='black', facecolor='blue', alpha=0.5)
+            ax.plot(ex['lags'], np.median(ROC_array, axis=1), color='blue', 
+                    linewidth=2, label='Bootstrapping')
+            ax.boxplot(ROC_array.T, positions=lags_s, widths=2)
+        
+        # mean AUC and error?
+        conf_int = np.empty( (2, len(ex['lags']) ) )
+        for l, lag in enumerate(ex['lags']):
+            # kolmogorov-smirnovtoets
+            a = score_metric[lag]
+            Ks = kstest(a, 'norm')
+            if Ks.pvalue > 0.05: print('lag {} distibution is not normal'.format(lag))
+            con = st.t.interval(0.95, len(a)-1, loc=np.mean(a), scale=st.sem(a))
+            conf_int[:,l] = con
+            
+        ax.fill_between(ex['lags'], conf_int[0], conf_int[1], linestyle='solid', 
+                        edgecolor='black', facecolor='red', alpha=0.5)
+
+        median_score = score_metric.median(axis=0)
+
+        ax.plot(ex['lags'], median_score, color='red', 
+                linewidth=2, label='k-fold validation {}'.format(metric))
+        
+        ax.boxplot(score_metric.T, positions=lags_f, widths=2)
+    
+        ax.set_xlim(min(ex['lags'])-5,max(ex['lags'])+5)
+        ax.set_xticks(ex['lags'])  
+        ax.set_xticklabels(ex['lags'])        
+        ax.legend()
+    
+    lags_str = str(ex['lags']).replace(' ', '')
+    fname = 'validation_plot_{}_{}'.format(lags_str, metric)
+    filename = os.path.join(ex['figpathbase'], ex['CPPA_folder'], fname)
+    g.fig.savefig(fname ,dpi=250, frameon=True)
+    #%%
+    return
+
+
+
+
+def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
     #%%
     # =============================================================================
     # calc ROC scores
-    # =============================================================================
-    ROC_Sem  = np.zeros(len(ex['lags']))
-    FP_TP    = np.zeros(len(ex['lags']), dtype=list)
-    ROC_boot = np.zeros(len(ex['lags']), dtype=list)
-    
-    if 'n_boot' not in ex.keys():
-        n_boot = 0
-    else:
-        n_boot = ex['n_boot']
-    
+    # =============================================================================      
     
     for lag_idx, lag in enumerate(ex['lags']):
         
@@ -57,7 +268,7 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
         dates_min_lag = dates_test - pd.Timedelta(int(lag), unit='d')
 
 
-        var_test_reg = Prec_reg.sel(time=dates_min_lag)        
+        var_test_reg = Prec_test_reg.sel(time=dates_min_lag)        
 
         if ex['use_ts_logit'] == False:
             # weight by robustness of precursors
@@ -66,73 +277,96 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
                                                             ds_Sem['pattern_CPPA'].sel(lag=lag))
         elif ex['use_ts_logit'] == True:
             crosscorr_Sem = ds_Sem['ts_prediction'][lag_idx]
-#        if idx == 0:
-#            print(ex['test_years'])
-#            print(crosscorr_Sem.time)
+
+
         
-        if (
-            ex['leave_n_out'] == True and ex['method'] == 'iter'
-            or ex['ROC_leave_n_out'] or ex['method'][:6] == 'random'
-            ):
+        if SCORE.all_test: 
             if ex['n'] == 0:
-                ex['test_RV'][idx]          = test['RV'].values
-                ex['test_ts_prec'][lag_idx]  = crosscorr_Sem.values
-            else:
-                ex['test_RV'][idx]     = np.concatenate( [ex['test_RV'][idx], test['RV'].values] )  
+                ex['test_RV'][lag_idx]          = test['RV'].values
+                ex['test_ts_prec'][lag_idx]     = crosscorr_Sem.values
+            elif len(ex['test_ts_prec'][lag_idx]) <= len(ex['dates_RV']):
+                ex['test_RV'][lag_idx]      = np.concatenate( [ex['test_RV'][idx], test['RV'].values] )  
                 ex['test_ts_prec'][lag_idx] = np.concatenate( [ex['test_ts_prec'][lag_idx], crosscorr_Sem.values] )
                 
-        
-            if  ex['n'] == ex['n_conv']-1:
-                if lag_idx == 0:
-                    print('Calculating ROC scores\nDatapoints precursor length '
-                      '{}\nDatapoints RV length {}'.format(len(ex['test_ts_prec'][0]),
-                       len(ex['test_RV'][0])))
-                    
-
-                ts_pred  = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
-                                          (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
-
-
-                if lag > 30:
-                    obs_array = pd.DataFrame(ex['test_RV'][0])
-                    obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
-                    if ex['event_percentile'] == 'std':
-                        # binary time serie when T95 exceeds 1 std
-                        threshold = obs_array.mean().values + obs_array.std().values
-                    else:
-                        percentile = ex['event_percentile']
-                        threshold = np.percentile(obs_array.values, percentile)
-                    events_idx = np.where(obs_array > threshold)[0]
-                else:
-                    events_idx = np.where(ex['test_RV'][0] > ex['event_thres'])[0]
-                y_true = func_CPPA.Ev_binary(events_idx, len(ex['test_RV'][0]),  ex['min_dur'], 
-                                         ex['max_break'], grouped=False)
-                y_true[y_true!=0] = 1
-        
                 
-                if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == True:
-                    ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
-                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
-                else:
-                    ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
-                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
-                
-                FP_TP[lag_idx] = FP, TP 
-                
-                print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
-                ' ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-                  lag, ROC_Sem[idx], np.percentile(ROC_boot[lag_idx], 99)))
-                
+        # ROC over folds, emptying array every fold 
+        if SCORE.fold or SCORE.notraintest:
+            ex['test_RV'][idx]          = test['RV'].values
+            ex['test_ts_prec'][lag_idx]  = crosscorr_Sem.values
+       
             
             
-        elif ex['leave_n_out'] == False or ex['method'][:5] == 'split':
+        if np.logical_and(SCORE.all_test, ex['n'] == ex['n_conv']-1) or SCORE.fold==True:
+            
+            ts_RV    = ex['test_RV'][idx]
+            ts_pred  = (ex['test_ts_prec'][lag_idx] - SCORE.Prec_train_mean[ex['n'],lag_idx]) / \
+                        SCORE.Prec_train_std[ex['n'],lag_idx]
+            logit_pred = SCORE.logitmodel[ex['n']][lag_idx].predict(ts_pred)
+            
+            events_idx = np.where(ex['test_RV'][idx] > SCORE.RV_thresholds[ex['n'],lag_idx])[0]
+            y_true = func_CPPA.Ev_binary(events_idx, len(ex['test_RV'][idx]),  ex['min_dur'], 
+                                     ex['max_break'], grouped=False)
+            y_true[y_true!=0] = 1
+            
+            if SCORE.fold:
+                dates_tofill = dates_test
+            else:
+                dates_tofill = ex['dates_RV'] 
+            SCORE.Prec_test_mean[ex['n'],lag_idx]   = np.mean(ts_pred)                
+            SCORE.Prec_test_std[ex['n'],lag_idx]    = np.std(ts_pred)            
+            percentiles_train = SCORE.xrpercentiles[ex['n']].sel(lag=lag)
+            SCORE.RV_test.loc[dates_tofill, lag]    = pd.Series(ts_RV, 
+                                                   index=dates_tofill)
+            SCORE.y_true_test.loc[dates_tofill, lag]= pd.Series(y_true, 
+                                                   index=dates_tofill)
+            SCORE.Prec_test.loc[dates_tofill, lag]  = pd.Series(ts_pred, 
+                                                   index=dates_tofill)
+            SCORE.logit_test.loc[dates_tofill, lag]= pd.Series(logit_pred, 
+                                                   index=dates_tofill)
+            
+        
+
+            if lag_idx == 0:
+                SCORE.Prec_len  = ts_pred.size
+                SCORE.RV_len    = len(ex['test_RV'][idx])
+                SCORE.n_events  = y_true[y_true!=0].sum()
+            
+                print('Calculating ROC scores\nDatapoints precursor length '
+                  '{}\nDatapoints RV length {}, with {:.0f} events'.format(SCORE.Prec_len,
+                   len(ex['test_RV'][idx]), y_true[y_true!=0].sum()))
+    
+            
+            AUC_score, FP, TP, ROCboot, KSSboot = ROC_score(ts_pred, y_true,
+                                                    n_boot=SCORE.n_boot, win=0, 
+                                                    n_blocks=ex['n_yrs'], 
+                                                    thr_pred=percentiles_train)
+            
+            
+            
+            if SCORE.fold==True:
+                # store results fold
+                SCORE.AUC.iloc[ex['n']][lag]        = AUC_score
+                SCORE.KSS.iloc[ex['n']][lag]        = get_KSS(TP, FP)
+                SCORE.FP_TP[ex['n'],lag_idx]        = FP, TP 
+                SCORE.ROC_boot[ex['n'],lag_idx, :]  = ROCboot
+                SCORE.KSS_boot[ex['n'],lag_idx, :]  = KSSboot
+                if ex['n'] != ex['n_conv']-1:
+                    # empty arrays.               
+                    ex['test_ts_prec'] = np.zeros( len(ex['lags']) , dtype=list)
+                    ex['test_RV'] = np.zeros( len(ex['lags']) , dtype=list)
+    
+
+
+   
+            
+        elif SCORE.notraintest:
             if idx == 0:
                 print('performing hindcast')
 
-            ex['test_RV'][lag_idx]          = test['RV'].values
-            ex['test_ts_prec'][lag_idx]  = crosscorr_Sem.values
-            ts_pred = ((ex['test_ts_prec'][lag_idx]-np.mean(ex['test_ts_prec'][lag_idx]))/ \
-                                          (np.std(ex['test_ts_prec'][lag_idx]) ) )                 
+#            ex['test_RV'][lag_idx]          = test['RV'].values
+#            ex['test_ts_prec'][lag_idx]     = crosscorr_Sem.values
+            ts_pred  = ((ex['test_ts_prec'][lag_idx]-SCORE.Prec_train_mean[ex['n'],lag_idx]) / \
+                                    SCORE.Prec_train_std[ex['n'],lag_idx] )              
             
             if lag > 30:
                 obs_array = pd.DataFrame(ex['test_RV'][0])
@@ -145,32 +379,107 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_reg, ex):
                                      ex['max_break'], grouped=False)
             y_true[y_true!=0] = 1
 
-            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
-                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
+            AUC_score, FP, TP, ROCboot, KSSboot = ROC_score(ts_pred, y_true,
+                                                    n_boot=0, win=0, 
+                                                    n_blocks=ex['n_yrs'])
+                                                    
             
 
-            FP_TP[lag_idx] = FP, TP 
-            
+
+           
+
+        if SCORE.fold==False and ex['n'] == ex['n_conv']-1:
+            SCORE.AUC.iloc[0][lag]     = AUC_score
+            SCORE.FP_TP[0,lag_idx]    = FP, TP 
+            SCORE.ROC_boot[0,lag_idx, :] = ROCboot 
             print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
             ' ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-              lag, ROC_Sem[idx], np.percentile(ROC_boot[lag_idx], 99)))
-        
+              lag, SCORE.AUC.iloc[0][lag], np.percentile(SCORE.ROC_boot[0,lag_idx, :], 95)))
+        if SCORE.fold and ex['n'] == ex['n_conv']-1:
+            print('\n*** ROC score for {} lag {} ***\n\nCPPA {:.2f} '
+            ' ±{:.2f} std over {} folds, {:.2f} 95th perc random events\n'.format(ex['region'], 
+              lag, np.mean(SCORE.AUC.iloc[:,lag_idx]), np.std(SCORE.AUC.iloc[:,lag_idx]), 
+              ex['n_conv'], np.percentile(ROCboot, 95) ) ) 
 
-        
-#    scores_lags = [i[0] for i in ROC_Sem]
-#    FP_TP_rate  = [i[1:] for i in ROC_Sem]
-    
-    ex['score'].append([ ROC_Sem, ROC_boot, FP_TP])
     #%%
-    return ex
+    return 
 
+def get_KSS(TP, FP):
+    '''Hansen Kuiper Skill Score from True & False positive rate'''
+    KSS_allthreshold = np.zeros(len(TP))
+    for i in range(len(TP)):
+        KSS_allthreshold[i] = TP[i] - FP[i]
+    return max(KSS_allthreshold)
+
+def get_statistics_train(RV_ts_train, ds_Sem, Prec_train_reg, SCORE, ex):
+#%%
+                     
+
+    pthresholds = np.linspace(1, 9, 9, dtype=int)
+   
+    
+    for lag_idx, lag in enumerate(ex['lags']):
+        dates_train = pd.to_datetime(RV_ts_train.time.values)
+        # select antecedant SST pattern to summer days:
+        dates_min_lag = dates_train - pd.Timedelta(int(lag), unit='d')
+
+
+        var_train_reg = Prec_train_reg.sel(time=dates_min_lag)   
+        
+        if ex['use_ts_logit'] == False:
+            # weight by robustness of precursors
+            var_train_reg = var_train_reg * ds_Sem['weights'].sel(lag=lag)
+            spatcov = func_CPPA.cross_correlation_patterns(var_train_reg, 
+                                                            ds_Sem['pattern_CPPA'].sel(lag=lag))
+        elif ex['use_ts_logit'] == True:
+            spatcov = ds_Sem['ts_prediction'][lag_idx]
+            
+        SCORE.Prec_train_mean[ex['n'],lag_idx] = spatcov.mean().values
+        SCORE.Prec_train_std[ex['n'],lag_idx]  = spatcov.std().values
+        
+        spatcov_norm = (spatcov - SCORE.Prec_train_mean[ex['n'],lag_idx]) / \
+                        SCORE.Prec_train_std[ex['n'],lag_idx]
+
+        SCORE.RV_train[ex['n']][lag_idx][:RV_ts_train.size]  = RV_ts_train.values
+        SCORE.Prec_train[ex['n']][lag_idx][:RV_ts_train.size] = spatcov_norm.values
+        
+        
+        
+        p_pred = []
+        for p in pthresholds:	
+            p_pred.append(np.percentile(spatcov_norm.values, p*10))
+            
+        SCORE.xrpercentiles[ex['n']][lag_idx] = p_pred
+        
+        obs_array = pd.DataFrame(RV_ts_train.values)
+        if lag >= 30:
+            obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
+        if ex['event_percentile'] == 'std':
+            # binary time serie when T95 exceeds 1 std
+            threshold = obs_array.mean().values + obs_array.std().values
+        else:
+            percentile = ex['event_percentile']
+            threshold = np.percentile(obs_array.values, percentile)
+        SCORE.RV_thresholds[ex['n'],lag_idx] = threshold
+        events_idx = np.where(RV_ts_train.values > threshold)[0]
+        y_true_train = func_CPPA.Ev_binary(events_idx, len(RV_ts_train),  
+                                           ex['min_dur'], ex['max_break'], grouped=False)
+        y_true_train[y_true_train!=0] = 1               
+        SCORE.y_true_train[ex['n']][lag_idx][:RV_ts_train.size] = y_true_train
+        model = sm.Logit(y_true_train, spatcov_norm.values, disp=0)
+        result = model.fit( disp=0 )
+        SCORE.logitmodel[ex['n']][lag_idx] = result
+        
+#%%
+    return
 
 def ROC_score_wrapper(ex):
     #%%
     ex['score'] = []
     FP_TP    = np.zeros(len(ex['lags']), dtype=list)
     ROC_Sem  = np.zeros(len(ex['lags']))
-    ROC_boot = np.zeros(len(ex['lags']))
+    ROC_boot = np.zeros( (len(ex['lags']), ex['n_boot']) )
+    KSS_boot = np.zeros( (len(ex['lags']), ex['n_boot']) )
 
     if 'n_boot' not in ex.keys():
         n_boot = 0
@@ -202,11 +511,12 @@ def ROC_score_wrapper(ex):
         
         
         if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == True:
-            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
-                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
+            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx], KSS_boot[lag_idx] = ROC_score(
+                            ts_pred, y_true, n_boot=n_boot, win=0, n_blocks=ex['n_yrs'])
         else:
-            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx] = ROC_score(ts_pred, y_true,
-                                           n_boot=n_boot, win=0, n_yrs=ex['n_yrs'])
+            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx], KSS_boot[lag_idx] = ROC_score(
+                            ts_pred, y_true, n_boot=n_boot, win=0, n_blocks=ex['n_yrs'])
+                                           
         
         FP_TP[lag_idx] = FP, TP 
         
@@ -219,7 +529,7 @@ def ROC_score_wrapper(ex):
     return ex
 
 
-def ROC_score(predictions, obs_binary, n_boot=0, win=0, n_yrs=39, thr_pred='default'):
+def ROC_score(predictions, obs_binary, n_boot=0, win=0, n_blocks=39, thr_pred='default'):
     #%%
 #    win = 7
 #    predictions = pred
@@ -247,7 +557,7 @@ def ROC_score(predictions, obs_binary, n_boot=0, win=0, n_yrs=39, thr_pred='defa
         if str(thr_pred) == 'default':
             p_pred = np.percentile(predictions, p*10)
         else:
-            p_pred = thr_pred.sel(percentile=p).values[0]
+            p_pred = thr_pred.sel(percentile=p).values
             
         positives_pred = np.where(predictions >= p_pred)[0][:]
         negatives_pred = np.where(predictions < p_pred)[0][:]
@@ -309,21 +619,22 @@ def ROC_score(predictions, obs_binary, n_boot=0, win=0, n_yrs=39, thr_pred='defa
         TP_rate[p] = True_pos_rate
         
     if n_boot != 0:
-        ROC_boot = ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='default')
+        ROC_boot, KSS_boot = ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_blocks=39, thr_pred='default')
     else:
         ROC_boot = 0
+        KSS_boot  = 0
         
     AUC_score = np.abs(np.trapz(TP_rate, x=FP_rate ))
     
-    return AUC_score, FP_rate, TP_rate, ROC_boot
+    return AUC_score, FP_rate, TP_rate, ROC_boot, KSS_boot
 
     #%%
 
-def ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='default'):
+def ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_blocks=39, thr_pred='default'):
     
     obs_binary = np.copy(obs_binary)
-    AUC_new = np.zeros((n_boot))
-    
+    AUC_new    = np.zeros((n_boot))
+    KSS_bootstrap  = np.zeros((n_boot))
     
     ROC_bootstrap = 0
     for j in range(n_boot):
@@ -335,7 +646,7 @@ def ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='de
         # shuffle years, but keep years complete:
         old_index = range(0,len(obs_binary),1)
 #        n_yr = ex['n_yrs']
-        n_oneyr = int( len(obs_binary) / n_yrs )
+        n_oneyr = int( len(obs_binary) / n_blocks )
         chunks = [old_index[n_oneyr*i:n_oneyr*(i+1)] for i in range(int(len(old_index)/n_oneyr))]
         # replace lost value because of python indexing 
 #        chunks[-1] = range(chunks[-1][0], chunks[-1][-1])
@@ -399,13 +710,16 @@ def ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_yrs=39, thr_pred='de
             FP_rate[p] = False_pos_rate
             TP_rate[p] = True_pos_rate
         
+        
+        KSS_bootstrap[j]  = get_KSS(TP_rate, FP_rate)
         AUC_score  = np.abs(np.trapz(TP_rate, FP_rate))
         AUC_new[j] = AUC_score
         AUC_new    = np.sort(AUC_new[:])[::-1]
 #        pval       = (np.asarray(np.where(AUC_new > ROC_score)).size)/ n_boot
         ROC_bootstrap = AUC_new 
     #%%
-    return ROC_bootstrap
+    return ROC_bootstrap, KSS_bootstrap
+
 
 # =============================================================================
 # =============================================================================
@@ -497,140 +811,36 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         #%%
 
 
-
-
-#
-#def single_ROC_score_wrapper(test, trian, ds, ex):
-#    #%%
-#    # =============================================================================
-#    # calc ROC scores
-#    # =============================================================================
-#    ROC  = np.zeros(len(ex['lags']))
-#    ROC_boot = np.zeros(len(ex['lags']))
-#    
-#    if ds['pattern'].name[:3] == 'mcK':
-#        var_test_reg = func_CPPA.find_region(test['Prec'], region=ex['regionmcK'])[0]
-#    else:
-#        var_test_reg = test['Prec']
-#        
-#        
-#    for lag in ex['lags']:
-#        idx = ex['lags'].index(lag)
-#        dates_test = func_CPPA.to_datesmcK(test['RV'].time, test['RV'].time.dt.hour[0], 
-#                                           test['Prec'].time[0].dt.hour)
-#        # select antecedant SST pattern to summer days:
-#        dates_min_lag = dates_test - pd.Timedelta(int(lag), unit='d')
-#        
-#    #    full_timeserie_regmck = var_test_mcK.sel(time=dates_min_lag)
-#    
-#        var_test = var_test_reg.sel(time=dates_min_lag)   
-#    
-#        if ds['pattern'].name[:3] == 'mcK':
-#            pred_ts = func_CPPA.cross_correlation_patterns(var_test, 
-#                                                            ds['pattern'].sel(lag=lag))
-#        if ex['use_ts_logit'] == False and ds['pattern'].name[:3] != 'mcK':
-#            # weight by robustness of precursors
-#            var_test = var_test * ds['weights'].sel(lag=lag)
-#            pred_ts = func_CPPA.cross_correlation_patterns(var_test, 
-#                                                            ds['pattern'].sel(lag=lag))
-#        elif ex['use_ts_logit'] == True and ds['pattern'].name[:3] != 'mcK':
-#            pred_ts = ds['ts_prediction'][idx]
-##        if idx == 0:
-##            print(ex['test_years'])
-##            print(crosscorr_Sem.time)
-#        
-#        if (ex['leave_n_out'] == True) and (ex['method'] == 'iter') or (ex['ROC_leave_n_out']):
-#            if ex['n'] == 0:
-#                ex['test_ts'][idx] = pred_ts.values 
-#                ex['test_RV'][idx]  = test['RV'].values
-#    #                ex['test_RV_Sem'][idx]  = test['RV'].values
-#            else:
-#    #                update_ROCS = ex['test_ts_mcK'][idx].append(list(crosscorr_mcK.values))
-#                ex['test_ts'][idx] = np.concatenate( [ex['test_ts_mcK'][idx], pred_ts.values] )
-#                ex['test_RV'][idx] = np.concatenate( [ex['test_RV'][idx], test['RV'].values] )  
-#                
-#                    
-#        
-#            if  ex['n'] == ex['n_conv']-1:
-#                if idx == 0:
-#                    print('Calculating ROC scores\nDatapoints precursor length '
-#                      '{}\nDatapoints RV length {}'.format(len(ex['test_ts_mcK'][0]),
-#                       len(ex['test_RV'][0])))
-#                
-#                # normalize
-#                ex['test_ts'][idx] = (ex['test_ts'][idx]-np.mean(ex['test_ts'][idx])/ \
-#                                          np.std(ex['test_ts'][idx]))            
-#                
-##                Prec_threshold_mcK = np.percentile(ex['test_ts_mcK'][idx], 70)
-##                Prec_threshold_Sem = np.percentile(ex['test_ts_prec'][idx], 70)
-##
-##                func_CPPA.plot_events_validation(ex['test_ts_prec'][idx], ex['test_ts_mcK'][idx], test['RV'], Prec_threshold_Sem, 
-##                                            Prec_threshold_mcK, ex['event_thres'], 2000)
-#                
-#                n_boot = 10
-#                ROC[idx], ROC_boot = ROC_score(ex['test_ts_mcK'][idx], ex['test_RV'][idx],
-#                                      ex['event_thres'], lag, n_boot, ex)
-#
-#                
-##                print('\n*** ROC score for {} lag {} ***\n\nMck {:.2f} \t Sem {:.2f} '
-##                '\t ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-##                  lag, ROC_mcK[idx], ROC_Sem[idx], 2*np.std(ROC_boot)))
-#            
-#                
-#        elif ex['leave_n_out'] == True and ex['method'] == 'random' :        
-#                               
-#            # check detection of precursor:
-#            Prec_threshold = ds['perc'].sel(percentile=60 /10).values[0]
-#            
-#            # check if there are any detections
-#            Prec_det = (func_CPPA.Ev_timeseries(pred_ts, 
-#                                           Prec_threshold).size > ex['min_detection'])
-#
-#
-#    
-#            if Prec_det == True:
-#                n_boot = 1
-#                ROC[idx], ROC_boot = ROC_score(pred_ts, test['RV'],
-#                                      ex['event_thres'], lag, n_boot, ex, ds['perc'])
-#            else:
-#                print('Not enough predictions detected, neglecting this predictions')
-#                ROC[idx] = ROC_boot = 0.5
-#    
-#                                  
-#            
-#            print('\n*** ROC score for {} lag {} ***\n\nMck {:.2f} \t Sem {:.2f} '
-#                '\t ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-#                  lag, ROC[idx], 2*np.std(ROC_boot)))
-#            
-#        elif ex['leave_n_out'] == False or ex['method'][:5] == 'split':
-#            if idx == 0:
-#                print('performing hindcast')
-#            n_boot = 5
-#            ROC[idx], ROC_boot = ROC_score(pred_ts, test['RV'],
-#                                   ex['event_thres'], lag, n_boot, ex)
-#
-#            
-##            Prec_threshold_Sem = np.percentile(pred_ts, 70)
-#            
-#            
-##            func_CPPA.plot_events_validation(crosscorr_Sem, crosscorr_mcK, test['RV'], Prec_threshold_Sem, 
-##                                            Prec_threshold_mcK, ex['event_thres'], 2000)
-#            
-##            func_CPPA.plot_events_validation(crosscorr_Sem, crosscorr_mcK, test['RV'], 
-##                                            ds_Sem['perc'].sel(percentile=5)), 
-##                                            Prec_threshold_mcK, ex['event_thres'], 2000)
-#            
-##            print('\n*** ROC score for {} lag {} ***\n\nMck {:.2f} \t Sem {:.2f} '
-##                '\t ±{:.2f} 2*std random events\n\n'.format(ex['region'], 
-##                  lag, ROC[idx], 2*np.std(ROC_boot)))
-#    
-#    #%%
-#    # store output:
-#    ds['score'] = xr.DataArray(data=ROC, coords=[ex['lags']], 
-#                      dims=['lag'], name='score_diff_lags',
-#                      attrs={'units':'-'})
-#
-#
-#    
-#    ex['score_per_run'].append([ex['test_years'], len(test['events']), ds, ROC_boot])
-#    return ex
+def AUC_sklearn(y_true, y_pred, n_bootstraps=5):
+    
+    AUC_score = roc_auc_score(y_true, y_pred)
+    print("Original ROC area: {:0.3f}".format(AUC_score))
+    
+    n_bootstraps = 1000
+    rng_seed = 42  # control reproducibility
+    bootstrapped_scores = []
+    
+    rng = np.random.RandomState(rng_seed)
+    for i in range(n_bootstraps):
+        # bootstrap by sampling with replacement on the prediction indices
+        indices = rng.random_integers(0, len(y_pred) - 1, len(y_pred))
+        if len(np.unique(y_true[indices])) < 2:
+            # We need at least one positive and one negative sample for ROC AUC
+            # to be defined: reject the sample
+            continue
+    
+        score = roc_auc_score(y_true[indices], y_pred[indices])
+        bootstrapped_scores.append(score)
+        print("Bootstrap #{} ROC area: {:0.3f}".format(i + 1, score))
+    
+    sorted_scores = np.array(bootstrapped_scores)
+    sorted_scores.sort()
+    
+    # Computing the lower and upper bound of the 90% confidence interval
+    # You can change the bounds percentiles to 0.025 and 0.975 to get
+    # a 95% confidence interval instead.
+    confidence_lower = sorted_scores[int(0.05 * len(sorted_scores))]
+    confidence_upper = sorted_scores[int(0.95 * len(sorted_scores))]
+    print("Confidence interval for the score: [{:0.3f} - {:0.3}]".format(
+        confidence_lower, confidence_upper))
+    return AUC_score, confidence_lower, confidence_upper

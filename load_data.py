@@ -10,15 +10,13 @@ import xarray as xr
 import pandas as pd
 import numpy as np
 import func_CPPA
-
+from dateutil.relativedelta import relativedelta as date_dt
+flatten = lambda l: [item for sublist in l for item in sublist]
 
 
 def load_data(ex):
     #%%
-    #'Mckinnonplot', 'U.S.', 'U.S.cluster', 'PEPrectangle', 'Pacific', 'Whole', 'Northern', 'Southern'
-    def oneyr(datetime):
-        return datetime.where(datetime.year==datetime.year[0]).dropna()
-    
+    #'Mckinnonplot', 'U.S.', 'U.S.cluster', 'PEPrectangle', 'Pacific', 'Whole', 'Northern', 'Southern'  
   
 
     # load ERA-i Time series
@@ -31,7 +29,10 @@ def load_data(ex):
     except:
         RVtsfull = dicRV['RVfullts']
     if ex['datafolder'] == 'ERAint':
-        ex['mask'] = dicRV['RV_array']['mask']
+        try:
+            ex['mask'] = dicRV['RV_array']['mask']
+        except:
+            ex['mask'] = dicRV['mask']
     elif ex['datafolder'] == 'era5':
         ex['mask'] = dicRV['mask']
     if ex['datafolder'] == 'ERAint' or ex['datafolder'] == 'era5':
@@ -47,10 +48,12 @@ def load_data(ex):
     
     # Load in external ncdf
     
-    #filename_precur = 'sm2_1979-2017_2jan_31okt_dt-1days_{}deg.nc'.format(ex['grid_res'])
-    #path = os.path.join(ex['path_raw'], 'tmpfiles')
-    # full globe - full time series
-    varfullgl = func_CPPA.import_array(ex['filename_precur'], ex)
+    dates_prec = subset_dates(datesRV, ex)
+    prec_filename = os.path.join(ex['path_pp'], ex['filename_precur'])
+    if ex['datafolder'] == 'EC':
+        varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
+    else:
+        varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, loadleap=True)
     if varfullgl.longitude.min() < -175 and varfullgl.longitude.max() > 175:
         varfullgl = func_CPPA.convert_longitude(varfullgl, 'only_east')
 
@@ -65,15 +68,24 @@ def load_data(ex):
         Prec_reg = Prec_reg.where(Prec_reg.values < 5.*Prec_reg.std(dim='time').values)
     
     if ex['add_lsm'] == True:
-        base_path_lsm = '/Users/semvijverberg/surfdrive/Scripts/rasterio/'
-        mask = func_CPPA.import_array(ex['mask_file'].format(ex['grid_res']), ex,
-                                     base_path_lsm)
-        mask_reg = func_CPPA.find_region(mask, region=ex['region'])[0]
-        mask_reg = mask_reg.to_array().squeeze()
-        mask = (('latitude', 'longitude'), mask_reg.values)
-        Prec_reg.coords['mask'] = mask
-        Prec_reg.values = Prec_reg * mask_reg
+        filename = os.path.join(ex['path_mask'], ex['mask_file'])
+        mask = func_CPPA.import_array(filename, ex)
+                                    
+        if len(mask.shape) == 3:
+            mask = mask[0].squeeze()
+            
+        if 'latitude' and 'longitude' not in mask.dims:
+            mask = mask.rename({'lat':'latitude',
+                       'lon':'longitude'})
     
+        mask_reg = func_CPPA.find_region(mask, region=ex['region'])[0]
+        mask_reg = mask_reg.squeeze()
+        mask_reg = np.array(mask_reg.values < 0.35, dtype=bool)
+
+        mask = (('latitude', 'longitude'), mask_reg)
+        Prec_reg.coords['mask'] = mask
+        Prec_reg = Prec_reg.where(mask_reg==True)
+#        xarray_plot(Prec_reg[0])
     
     if ex['rollingmean'][0] == 'RV':
         RVtsfull = func_CPPA.rolling_mean_time(RVtsfull, ex, center=True)
@@ -100,23 +112,47 @@ def load_data(ex):
     
     # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
     RV_ts = RVtsfull.sel(time=datesRV)
-    ex['n_oneyr'] = oneyr(datesRV).size
+    ex['n_oneyr'] = func_CPPA.get_oneyr(datesRV).size
     
     if ex['tfreq'] != 1:
         RV_ts, dates = func_CPPA.time_mean_bins(RV_ts, ex)
     #expanded_time = func_mcK.expand_times_for_lags(dates, ex)
     
-    if ex['event_percentile'] == 'std':
-        # binary time serie when T95 exceeds 1 std
-        ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
+    if ex['RVts_filename'][:8] == 'nino3.4_' and 'event_thres' in ex.keys():
+        ex['event_thres'] = ex['event_thres']
     else:
-        percentile = ex['event_percentile']
-        ex['event_thres'] = np.percentile(RV_ts.values, percentile)
+        if ex['event_percentile'] == 'std':
+            # binary time serie when T95 exceeds 1 std
+            ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
+        else:
+            percentile = ex['event_percentile']
+            ex['event_thres'] = np.percentile(RV_ts.values, percentile)
 
     ex['n_yrs'] = len(set(RV_ts.time.dt.year.values))
     
     #%%
     return RV_ts, Prec_reg, ex
 
+    
+def subset_dates(datesRV, ex):
+    oneyr = func_CPPA.get_oneyr(datesRV)
+    newstart = (oneyr[0] - pd.Timedelta(max(ex['lags']), 'd') \
+                - pd.Timedelta(31, 'd') )
+    newend   = (oneyr[-1] + pd.Timedelta(31, 'd') )
+    newoneyr = pd.DatetimeIndex(start=newstart, end=newend,
+                                freq=datesRV[1] - datesRV[0])
+    newoneyr = func_CPPA.remove_leapdays(newoneyr)
+    return make_dates(datesRV, newoneyr, breakyr=None)
 
-
+def make_dates(datetime, start_yr, breakyr=None):
+    if breakyr == None:
+        breakyr = datetime.year.max()
+        
+    nyears = (breakyr - datetime.year[0])+1
+    next_yr = start_yr
+    for yr in range(0,nyears-1):
+        next_yr = pd.to_datetime([date + date_dt(years=1) for date in next_yr])
+        start_yr = start_yr.append(next_yr)
+        if next_yr[-1].year == breakyr:
+            break
+    return start_yr

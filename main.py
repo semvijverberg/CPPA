@@ -42,7 +42,7 @@ from ROC_score import plotting_timeseries
 xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
-
+#import init.era5_t2mmax_W_US_sst as settings
 import init.era5_t2mmax_E_US_sst as settings
 #import init.EC_t2m_E_US as settings
 
@@ -210,7 +210,7 @@ if 'use_ts_logit' in ex.keys():
         predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
 else:
     ex['use_ts_logit'] = False
-    predict_folder = 'spatcov_CPPA'
+    predict_folder = ''
 ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
 if ex['store_timeseries'] == True:
     
@@ -252,7 +252,7 @@ if 'score' in ex.keys():
 try:
     score_AUC       = np.round(SCORE.AUC.mean(0).values, 2)
     ex['score_AUC']   = score_AUC
-    ROC_str_Sem     = ['{} days - ROC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
+    ROC_str_Sem     = ['{} days - AUC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
 except:
     ROC_str_Sem     = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
 #ROC_boot = [np.round(np.percentile(SCORE.ROC_boot,95), 2) for i in range(len(ex['lags']))]
@@ -276,12 +276,12 @@ except:
 # =============================================================================
 #   Plotting
 # =============================================================================
-
+lags_plot = [0, 10, 20, 35, 50, 65]
 
 lats = Prec_reg.latitude
 lons = Prec_reg.longitude
 array = np.zeros( (len(l_ds_CPPA), len(ex['lags']), len(lats), len(lons)) )
-patterns_Sem = xr.DataArray(data=array, coords=[range(len(l_ds_CPPA)), ex['lags'], lats, lons], 
+patterns_Sem = xr.DataArray(data=array, coords=[range(len(l_ds_CPPA)), lags_plot, lats, lons], 
                       dims=['n_tests', 'lag','latitude','longitude'], 
                       name='{}_tests_patterns_Sem'.format(len(l_ds_CPPA)), attrs={'units':'Kelvin'})
 
@@ -295,7 +295,7 @@ for n in range(len(ex['train_test_list'])):
             patterns_Sem = patterns_Sem.sel(n_tests=slice(0,len(l_ds_CPPA)))
 
     
-    upd_pattern = l_ds_CPPA[n]['pattern_' + name_for_ts].sel(lag=ex['lags'])
+    upd_pattern = l_ds_CPPA[n]['pattern_' + name_for_ts].sel(lag=lags_plot)
     patterns_Sem[n,:,:,:] = upd_pattern * l_ds_CPPA[n]['std_train_min_lag']
 
 
@@ -323,29 +323,29 @@ func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
 
 lats = patterns_Sem.latitude
 lons = patterns_Sem.longitude
-array = np.zeros( (ex['n_conv'], len(ex['lags']), len(lats), len(lons)) )
+array = np.zeros( (ex['n_conv'], len(lags_plot), len(lats), len(lons)) )
 wgts_tests = xr.DataArray(data=array, 
-                coords=[range(ex['n_conv']), ex['lags'], lats, lons], 
+                coords=[range(ex['n_conv']), lags_plot, lats, lons], 
                 dims=['n_tests', 'lag','latitude','longitude'], 
                 name='{}_tests_wghts'.format(ex['n_conv']), attrs={'units':'wghts ['})
 for n in range(ex['n_conv']):
 #    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=ex['lags'])
-    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=ex['lags']).where(l_ds_CPPA[n]['pat_num_CPPA']>0.5)
+    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=lags_plot).where(l_ds_CPPA[n]['pat_num_CPPA']>0.5)
     
 from matplotlib.colors import LinearSegmentedColormap 
 if ex['leave_n_out']:
-    n_lags = len(ex['lags'])
+    n_lags = len(lags_plot)
     n_lats = patterns_Sem.sel(n_tests=0).latitude.size
     n_lons = patterns_Sem.sel(n_tests=0).longitude.size
     
-    pers_patt = patterns_Sem.sel(n_tests=0).sel(lag=ex['lags']).copy()
+    pers_patt = patterns_Sem.sel(n_tests=0).sel(lag=lags_plot).copy()
 #    arrpatt = np.nan_to_num(patterns_Sem.values)
 #    mask_patt = (arrpatt != 0)
 #    arrpatt[mask_patt] = 1
     wghts = np.zeros( (n_lags, n_lats, n_lons) )
 #    plt.imshow(arrpatt[0,0]) ; plt.colorbar()
-    for l in ex['lags']:
-        i = ex['lags'].index(l)
+    for l in lags_plot:
+        i = lags_plot.index(l)
         wghts[i] = np.nansum(wgts_tests[:,i,:,:].values, axis=0)
     pers_patt.values = wghts 
     pers_patt = pers_patt.where(pers_patt.values != 0)
@@ -359,7 +359,7 @@ if ex['leave_n_out']:
     mean = np.round(pers_patt.mean(dim=('latitude', 'longitude')).values, 1)
 #    mean = pers_patt.quantile(0.80, dim=('latitude','longitude')).values
     std =  np.round(pers_patt.std(dim=('latitude', 'longitude')).values, 0)
-    ax_text = ['mean = {}±{}'.format(mean[l],int(std[l])) for l in range(len(ex['lags']))]
+    ax_text = ['mean = {}±{}'.format(mean[l],int(std[l])) for l in range(len(lags_plot))]
     colors = plt.cm.magma_r(np.linspace(0,0.7, 20))
     colors[-1] = plt.cm.magma_r(np.linspace(0.99,1, 1))
     cm = LinearSegmentedColormap.from_list('test', colors, N=255)
@@ -425,7 +425,7 @@ elif ex['method'][:] == 'no_train_test_split':
 #test_set_to_plot = list(np.arange(0,ex['n_conv'],5))
 for yr in test_set_to_plot: 
     n = test_set_to_plot.index(yr)
-    Robustness_weights = l_ds_CPPA[n]['weights'].sel(lag=ex['lags'])
+    Robustness_weights = l_ds_CPPA[n]['weights'].sel(lag=lags_plot)
     size_trainset = ex['n_yrs'] - ex['leave_n_years_out']
     Robustness_weights.attrs['title'] = ('Robustness\n test yr(s): {}, single '
                             'training set (n={} yrs)'.format(yr,size_trainset))
@@ -477,15 +477,15 @@ if ex['method'] == 'iter':
 #%% Initial regions from only composite extraction:
 key_pattern_num = 'pat_num_CPPA_clust'
 
-lags = ex['lags']
+lags = lags_plot
 if ex['leave_n_out']:
     subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
     total_folder = os.path.join(ex['figpathbase'], subfolder)
     if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
     if 'ROC_str_Sem' in globals():
-        subtitles = [ROC_str_Sem[ex['lags'].index(l)] for l in lags]
+        subtitles = [ROC_str_Sem[lags_plot.index(l)] for l in lags]
     else:
-        subtitles = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
+        subtitles = ['{} days'.format(lags_plot[i]) for i in range(len(lags_plot)) ]
     
         
     func_CPPA.plot_precursor_regions(l_ds_CPPA, ex['n_conv'], key_pattern_num, lags, subtitles, ex)

@@ -36,8 +36,8 @@ def __init__():
          'startyear'    :       1979,
          'endyear'      :       2018,
          'path_pp'      :       path_pp,
-         'startperiod'  :       '06-24', #'1982-06-24',
-         'endperiod'    :       '08-22', #'1982-08-22',
+         'startperiod'  :       '04-25', #'1982-06-24',
+         'endperiod'    :       '06-23', #'1982-08-22',
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
          'RVts_filename':       "spatcov_CPPA_only_test_ts_2019_05_18.npy", 
@@ -53,10 +53,9 @@ def __init__():
     # Settings for event timeseries
     # =============================================================================
     ex['tfreq']                 =       1 
-    ex['max_break']             =       0 # default 0
-    ex['min_dur']               =       25 # default 1
-#    ex['event_thres']           =       -0.5
-    ex['event_percentile']      =       10
+    ex['max_break']             =       0   
+    ex['min_dur']               =       25
+    ex['event_percentile']      =       90
     # =============================================================================
     # Settins for precursor / CPPA
     # =============================================================================

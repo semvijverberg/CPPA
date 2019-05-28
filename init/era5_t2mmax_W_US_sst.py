@@ -84,7 +84,7 @@ def __init__():
     ex['leave_n_out']           =       True
     ex['ROC_leave_n_out']       =       False
     ex['method']                =       'random10fold' #'iter' or 'no_train_test_split' or split#8 or random3  
-    ex['n_boot']                =       1000
+    ex['n_boot']                =       1
     
     if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
         ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 

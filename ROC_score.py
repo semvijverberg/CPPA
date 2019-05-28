@@ -123,10 +123,18 @@ class SCORE_CLASS():
         return pvalue
     
     @property
-    def get_AUC_spatcov(self):
+    def get_AUC_spatcov(self, alpha=0.05, n_boot=5):
+        self.df_auc_spatcov = pd.DataFrame(data=np.zeros( (3, len(self._lags)) ), columns=[self._lags],
+                              index=['AUC', 'con_low', 'con_high'])
+        self.Prec_test_boot = pd.DataFrame(data=np.zeros( (n_boot, len(self._lags)) ), columns=[self._lags])
+                              
         for lag in self._lags:
-            AUC_sklearn(self.y_true_test[lag], self.Prec_test[lag], n_bootstraps=5)
-    
+            AUC_score, conf_lower, conf_upper, sorted_scores = AUC_sklearn(
+                    self.y_true_test[lag], self.Prec_test[lag], 
+                    alpha=alpha, n_bootstraps=n_boot)
+            self.df_auc_spatcov[lag] = (AUC_score, conf_lower, conf_upper) 
+            self.Prec_test_boot[lag] = sorted_scores
+        return self
                 
 
 def only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
@@ -810,8 +818,17 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         plt.show()
         #%%
 
+def get_AUC(SCORE, y_true, prec_test, alpha=0.05, n_boot=5):
+    df_auc = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
+                          index=['AUC', 'con_low', 'con_high'])
+    for lag in SCORE._lags:
+        AUC_score, conf_lower, conf_upper, sorted_scores = AUC_sklearn(
+                    y_true[lag], prec_test[lag], 
+                    alpha=alpha, n_bootstraps=n_boot)
+        df_auc[lag] = (AUC_score, conf_lower, conf_upper) 
+    return df_auc, sorted_scores
 
-def AUC_sklearn(y_true, y_pred, n_bootstraps=5):
+def AUC_sklearn(y_true, y_pred, alpha=0.05, n_bootstraps=5):
     
     AUC_score = roc_auc_score(y_true, y_pred)
     print("Original ROC area: {:0.3f}".format(AUC_score))
@@ -823,7 +840,7 @@ def AUC_sklearn(y_true, y_pred, n_bootstraps=5):
     rng = np.random.RandomState(rng_seed)
     for i in range(n_bootstraps):
         # bootstrap by sampling with replacement on the prediction indices
-        indices = rng.random_integers(0, len(y_pred) - 1, len(y_pred))
+        indices = rng.randint(0, len(y_pred) - 1, len(y_pred))
         if len(np.unique(y_true[indices])) < 2:
             # We need at least one positive and one negative sample for ROC AUC
             # to be defined: reject the sample
@@ -831,7 +848,7 @@ def AUC_sklearn(y_true, y_pred, n_bootstraps=5):
     
         score = roc_auc_score(y_true[indices], y_pred[indices])
         bootstrapped_scores.append(score)
-        print("Bootstrap #{} ROC area: {:0.3f}".format(i + 1, score))
+#        print("Bootstrap #{} ROC area: {:0.3f}".format(i + 1, score))
     
     sorted_scores = np.array(bootstrapped_scores)
     sorted_scores.sort()
@@ -839,8 +856,8 @@ def AUC_sklearn(y_true, y_pred, n_bootstraps=5):
     # Computing the lower and upper bound of the 90% confidence interval
     # You can change the bounds percentiles to 0.025 and 0.975 to get
     # a 95% confidence interval instead.
-    confidence_lower = sorted_scores[int(0.05 * len(sorted_scores))]
-    confidence_upper = sorted_scores[int(0.95 * len(sorted_scores))]
-    print("Confidence interval for the score: [{:0.3f} - {:0.3}]".format(
-        confidence_lower, confidence_upper))
-    return AUC_score, confidence_lower, confidence_upper
+    confidence_lower = sorted_scores[int(alpha * len(sorted_scores))]
+    confidence_upper = sorted_scores[int((1-alpha) * len(sorted_scores))]
+#    print("Confidence interval for the score: [{:0.3f} - {:0.3}]".format(
+#        confidence_lower, confidence_upper))
+    return AUC_score, confidence_lower, confidence_upper, sorted_scores

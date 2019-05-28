@@ -327,7 +327,6 @@ def get_chunks(all_yrs_set, comp_years, ex):
 
 
 def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag, std_train_lag, ex):
-                                             
     #%% 
 #    T, pval, mask_sig = Welchs_t_test(sample, full, alpha=0.01)
 #    threshold = np.reshape( mask_sig, (mask_sig.size) )
@@ -477,15 +476,22 @@ def store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
 
 def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
     #%%
-    
-    
+    ts_3d    = Prec_reg
+    # mean of El nino 3.4
+    ts_3d_nino = find_region(Prec_reg, region='elnino3.4')[0]
+    # get lonlat array of area for taking spatial means 
+    nino_index = area_weighted(ts_3d_nino).mean(dim=('latitude', 'longitude'), skipna=True).values
+    dates = pd.to_datetime(ts_3d.time.values)
+    dates -= pd.Timedelta(dates.hour[0], unit='h')
+    df_nino = pd.DataFrame(data = nino_index[:,None], index=dates, columns=['nino3.4']) 
+    df_nino['nino3.4rm5'] = df_nino['nino3.4'].rolling(int((365/12)*5), min_periods=1).mean()
     for lag in ex['lags']:
         idx = ex['lags'].index(lag)
 
 
         mask_regions = np.nan_to_num(ds_Sem['pat_num_CPPA_clust'].sel(lag=lag).values) >= 1
         # Make time series for whole period
-        ts_3d    = Prec_reg
+        
         mask_notnan = (np.product(np.isnan(ts_3d.values),axis=0)==False) # nans == False
         mask = mask_notnan * mask_regions
         ts_3d_mask     = ts_3d.where(mask==True)
@@ -519,25 +525,21 @@ def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
         
         # spatial covariance of whole CPPA pattern
         spatcov_CPPA = cross_correlation_patterns(ts_3d_w, pattern_CPPA)
-        # mean of El nino 3.4
-        ts_3d_nino = find_region(Prec_reg, region='elnino3.4')[0]
-        # get lonlat array of area for taking spatial means 
-        nino_index = area_weighted(ts_3d_nino).mean(dim=('latitude', 'longitude'), skipna=True).values
+
         
         # merge data
         columns = list(np.array(regions_for_ts, dtype=int))
         columns.insert(0, 'spatcov_CPPA')
-        columns.insert(0, 'nino3.4')
 
                
-        data = np.concatenate([nino_index[:,None], spatcov_CPPA.values[:,None],
+        data = np.concatenate([spatcov_CPPA.values[:,None],
                                ts_regions_lag_i], axis=1)
-        dates = pd.to_datetime(ts_3d_w.time.values)
+        dates = pd.to_datetime(ts_3d.time.values)
         dates -= pd.Timedelta(dates.hour[0], unit='h')
-        df = pd.DataFrame(data = data, index=dates, columns=columns) 
-        df['nino3.4rm5'] = df['nino3.4'].rolling(int((365/12)*5), min_periods=1).mean()
-        columns.insert(1, 'nino3.4rm5')
-        df = df.reindex(columns, axis=1)
+        df_CPPA = pd.DataFrame(data = data, index=dates, columns=columns) 
+        
+        
+        df = pd.concat([df_nino, df_CPPA], axis=1)
         df.index.name = 'date'
         
         name_trainset = 'testyr{}_{}.csv'.format(ex['test_year'], lag)
@@ -694,27 +696,35 @@ def filter_autocorrelation(ds_Sem, ex):
     return weights * ds_Sem['pattern']
 
 
-def Welchs_t_test(sample, full, alpha):
-    np.warnings.filterwarnings('ignore')
+def Welchs_t_test(sample, full, min_alpha=0.05, fieldsig=True):
+    '''mask returned is True where values are non-significant'''
+    from statsmodels.sandbox.stats import multicomp
+#    np.warnings.filterwarnings('ignore')
     mask = (sample[0] == 0.).values
+    nanmaskspace = np.isnan(sample.values[0])
 #    mask = np.reshape(mask, (mask.size))
     n_space = full.latitude.size*full.longitude.size
     npfull = np.reshape(full.values, (full.time.size, n_space))
     npsample = np.reshape(sample.values, (sample.time.size, n_space))
     
-#    npsample = npsample[np.broadcast_to(mask==False, npsample.shape)] 
-#    npsample = np.reshape(npsample, (sample.time.size, 
-#                                     int(npsample.size/sample.time.size) ))
-#    npfull   = npfull[np.broadcast_to(mask==False, npfull.shape)] 
-#    npfull = np.reshape(npfull, (full.time.size, 
-#                                     int(npfull.size/full.time.size) ))
-       
     T, pval = scipy.stats.ttest_ind(npsample, npfull, axis=0, 
-                                equal_var=False, nan_policy='omit')
+                                equal_var=False, nan_policy='propagate')
+    
+    
+    if fieldsig == True:
+        pval_fdr = pval.copy()
+        pval_fdr = pval[~np.isnan(pval)]
+        alpha_fdr = 2*min_alpha
+        pval_fdr = multicomp.multipletests(pval_fdr, alpha=alpha_fdr, method='fdr_bh')[1]
+        pval[~np.isnan(pval)] = pval_fdr
+        
     pval = np.reshape(pval, (full.latitude.size, full.longitude.size))
+    
     T = np.reshape(T, (full.latitude.size, full.longitude.size))
-    mask_sig = (pval > alpha) 
+    mask_sig = (pval > min_alpha) 
     mask_sig[mask] = True
+    mask_sig[nanmaskspace] = True
+#    plt.imshow(mask_sig)
     return T, pval, mask_sig
 
 def merge_neighbors(lsts):
@@ -2226,11 +2236,14 @@ def plotting_wrapper(plotarr, ex, filename=None,  kwrgs=None):
     if kwrgs == None:
         kwrgs = dict( {'title' : plotarr.name, 'clevels' : 'notdefault', 'steps':17,
                         'vmin' : -3*plotarr.std().values, 'vmax' : 3*plotarr.std().values, 
-                       'cmap' : plt.cm.RdBu_r, 'column' : 1, 'subtitles' : None} )
+                       'cmap' : plt.cm.RdBu_r, 'column' : 1, 'subtitles' : None,
+                       'style_colormap' : 'pcolormesh'} )
     else:
         kwrgs = kwrgs
         if 'title' not in kwrgs.keys():
             kwrgs['title'] = plotarr.attrs['title']
+        if 'style_colormap' not in kwrgs.keys():
+            kwrgs['style_colormap'] = 'pcolormesh'
             
         
     if filename != None:
@@ -2291,10 +2304,30 @@ def finalfigure(xrdata, file_name, kwrgs):
             plotdata = extend_longitude(xrdata[n_ax]).squeeze().drop('ds')
         else:
             plotdata = xrdata[n_ax].squeeze()
-        im = plotdata.plot.pcolormesh(ax=ax, cmap=cmap,
+        if kwrgs['style_colormap'] == 'pcolormesh':
+            im = plotdata.plot.pcolormesh(ax=ax, cmap=cmap,
                                transform=ccrs.PlateCarree(),
                                subplot_kws={'projection': map_proj},
                                 levels=clevels, add_colorbar=False)
+        
+        if kwrgs['style_colormap'] == 'contourf':
+            im = plotdata.plot.contourf(ax=ax, cmap=cmap,
+                               transform=ccrs.PlateCarree(),
+                               subplot_kws={'projection': map_proj},
+                                levels=clevels, add_colorbar=False)
+
+        if 'sign_stipling' in kwrgs.keys():
+            if kwrgs['sign_stipling'][0] == 'colorplot':
+                sigdata = kwrgs['sign_stipling'][1]
+                if periodic == True:
+                    sigdata = extend_longitude(sigdata[n_ax]).squeeze().drop('ds')
+                else:
+                    sigdata = sigdata[n_ax].squeeze()
+                sigdata.plot.contourf(ax=ax, levels=[0, 0.5, 1],
+                           transform=ccrs.PlateCarree(), hatches=['...', ''],
+                           colors='none', add_colorbar=False,
+                           subplot_kws={'projection': map_proj})
+            
         ax.coastlines(color='black', alpha=0.3, facecolor='grey')
         ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
         
@@ -2306,12 +2339,23 @@ def finalfigure(xrdata, file_name, kwrgs):
                 condata = extend_longitude(condata[n_ax]).squeeze().drop('ds')
             else:
                 condata = condata[n_ax].squeeze()
-            condata.plot.contour(ax=ax, 
+            condata.plot.contour(ax=ax, add_colorbar=False,
                                transform=ccrs.PlateCarree(),
                                subplot_kws={'projection': map_proj},
-                                levels=con_levels)
-
-        
+                                levels=con_levels, cmap=cmap)
+            if 'sign_stipling' in kwrgs.keys():
+                if kwrgs['sign_stipling'][0] == 'contour':
+                    sigdata = kwrgs['sign_stipling'][1]
+                    if periodic == True:
+                        sigdata = extend_longitude(sigdata[n_ax]).squeeze().drop('ds')
+                    else:
+                        sigdata = sigdata[n_ax].squeeze()
+                    sigdata.plot.contourf(ax=ax, levels=[0, 0.5, 1],
+                               transform=ccrs.PlateCarree(), hatches=['...', ''],
+                               colors='none', add_colorbar=False,
+                               subplot_kws={'projection': map_proj})
+                                
+                  
         
         if kwrgs['subtitles'] == None:
             pass

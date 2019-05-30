@@ -43,7 +43,8 @@ xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
 #import init.era5_t2mmax_W_US_sst as settings
-import init.era5_t2mmax_E_US_sst as settings
+#import init.era5_t2mmax_E_US_sst as settings
+import init.ERAint_t2mmax_E_US_sst as settings
 #import init.EC_t2m_E_US as settings
 
 
@@ -161,7 +162,9 @@ if ex['store_timeseries'] == True:
 
 
 #%% 
-
+# ERAint: '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random4fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-05-18/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p_pmd1'
+    
+    
 # =============================================================================
 # Load and Generate output in console
 # =============================================================================
@@ -226,7 +229,7 @@ if ex['store_timeseries'] == True:
 else:
     key_pattern_num = 'pat_num_CPPA'
     ex, SCORE = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-    ex['score'] = SCORE 
+    ex['score'] = SCORE
     filename_2 = 'output_main_dic_with_score'
     to_dict = dict( { 'ex'      :   ex,
                      'l_ds_CPPA' : l_ds_CPPA} )
@@ -249,12 +252,7 @@ if 'score' in ex.keys():
 
 
 
-try:
-    score_AUC       = np.round(SCORE.AUC.mean(0).values, 2)
-    ex['score_AUC']   = score_AUC
-    ROC_str_Sem     = ['{} days - AUC score {}'.format(ex['lags'][i], score_AUC[i]) for i in range(len(ex['lags'])) ]
-except:
-    ROC_str_Sem     = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
+
 #ROC_boot = [np.round(np.percentile(SCORE.ROC_boot,95), 2) for i in range(len(ex['lags']))]
 
 
@@ -277,10 +275,14 @@ except:
 #   Plotting
 # =============================================================================
 lags_plot = [0, 10, 20, 35, 50, 65]
+try:
+    ROC_str_Sem     = ['{} days - AUC score {}'.format(l, np.round(SCORE.AUC[l].mean(0), 2) ) for l in lags_plot ]
+except:
+    ROC_str_Sem     = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
 
 lats = Prec_reg.latitude
 lons = Prec_reg.longitude
-array = np.zeros( (len(l_ds_CPPA), len(ex['lags']), len(lats), len(lons)) )
+array = np.zeros( (len(l_ds_CPPA), len(lags_plot), len(lats), len(lons)) )
 patterns_Sem = xr.DataArray(data=array, coords=[range(len(l_ds_CPPA)), lags_plot, lats, lons], 
                       dims=['n_tests', 'lag','latitude','longitude'], 
                       name='{}_tests_patterns_Sem'.format(len(l_ds_CPPA)), attrs={'units':'Kelvin'})
@@ -302,14 +304,14 @@ for n in range(len(ex['train_test_list'])):
     
 kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
                     'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : ROC_str_Sem,
-                   'cmap' : plt.cm.RdBu_r, 'column' : 1} )
+                   'cmap' : plt.cm.RdBu_r, 'column' : 2} )
 
 mean_n_patterns = patterns_Sem.mean(dim='n_tests')
 mean_n_patterns = mean_n_patterns.where(l_ds_CPPA[n]['pat_num_CPPA']>0.5)
-mean_n_patterns.attrs['units'] = 'mean over {} runs'.format(ex['n_conv'])
+mean_n_patterns.attrs['units'] = '[K]'
 mean_n_patterns.attrs['title'] = 'CPPA - Precursor Pattern'
 try:
-    mean_n_patterns.name = 'ROC {}'.format(score_AUC)
+    mean_n_patterns.name = 'mean_{}_traintest'.format(ex['n_conv'])
 except:
     mean_n_patterns.name = '' 
 filename = os.path.join('', 'mean_over_{}_tests'.format(ex['n_conv']) )

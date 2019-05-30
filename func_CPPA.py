@@ -1729,6 +1729,8 @@ def find_region(data, region='Pacific_US'):
         west_lon = -360; east_lon = -0.1; south_lat = -15; north_lat = 30 
     elif region ==  'elnino3.4':
         west_lon = -170; east_lon = -120; south_lat = -5; north_lat = 5 
+    elif region ==  'PEPrectangle':
+        west_lon = -215; east_lon = -130; south_lat = 20; north_lat = 50
 #    elif region == 'for_soil':
         
 

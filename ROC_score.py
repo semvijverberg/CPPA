@@ -15,8 +15,8 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import seaborn as sns
 import statsmodels.formula.api as sm
-from sklearn.metrics import roc_auc_score
-
+from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.metrics import brier_score_loss
 
 class SCORE_CLASS():
     
@@ -34,7 +34,10 @@ class SCORE_CLASS():
         self.n_boot         = ex['n_boot']
         self._n_conv        = ex['n_conv']
         self._lags          = ex['lags']
-        
+        if 'regionmcK' in ex.keys() and ex['exppathbase'].split('_')[1]=='PEP':
+            self.PEPpattern = True
+        else:
+            self.PEPpattern = False
         if self.fold: shape = (self._n_conv, len(ex['lags']) )
         if self.fold==False or self.notraintest: shape = (1, len(ex['lags']) )
         
@@ -54,7 +57,7 @@ class SCORE_CLASS():
                                            columns=ex['lags'], 
                                            index = ex['dates_RV']) 
         # training data is different every train test set.
-        trainsize = ex['train_test_list'][0][0]['RV'].size
+        trainsize = ex['train_test_list'][9][0]['RV'].size
         shape_train          = (self._n_conv, len(ex['lags']), trainsize ) 
         self.RV_train        = np.zeros( shape_train )
         self.y_true_train    = np.zeros( shape_train )
@@ -122,19 +125,19 @@ class SCORE_CLASS():
             pvalue[l] = rand[rand > AUC].size / rand.size
         return pvalue
     
-    @property
-    def get_AUC_spatcov(self, alpha=0.05, n_boot=5):
-        self.df_auc_spatcov = pd.DataFrame(data=np.zeros( (3, len(self._lags)) ), columns=[self._lags],
-                              index=['AUC', 'con_low', 'con_high'])
-        self.Prec_test_boot = pd.DataFrame(data=np.zeros( (n_boot, len(self._lags)) ), columns=[self._lags])
-                              
-        for lag in self._lags:
-            AUC_score, conf_lower, conf_upper, sorted_scores = AUC_sklearn(
-                    self.y_true_test[lag], self.Prec_test[lag], 
-                    alpha=alpha, n_bootstraps=n_boot)
-            self.df_auc_spatcov[lag] = (AUC_score, conf_lower, conf_upper) 
-            self.Prec_test_boot[lag] = sorted_scores
-        return self
+#    @property
+#    def get_AUC_spatcov(self, alpha=0.05, n_boot=5):
+#        self.df_auc_spatcov = pd.DataFrame(data=np.zeros( (3, len(self._lags)) ), columns=[self._lags],
+#                              index=['AUC', 'con_low', 'con_high'])
+#        self.Prec_test_boot = pd.DataFrame(data=np.zeros( (n_boot, len(self._lags)) ), columns=[self._lags])
+#                              
+#        for lag in self._lags:
+#            AUC_score, conf_lower, conf_upper, sorted_scores = AUC_sklearn(
+#                    self.y_true_test[lag], self.Prec_test[lag], 
+#                    alpha=alpha, n_bootstraps=n_boot)
+#            self.df_auc_spatcov[lag] = (AUC_score, conf_lower, conf_upper) 
+#            self.Prec_test_boot[lag] = sorted_scores
+#        return self
                 
 
 def only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
@@ -142,6 +145,9 @@ def only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
     # init class
     SCORE = SCORE_CLASS(ex)
     
+    if SCORE.PEPpattern:
+        Prec_reg = func_CPPA.find_region(Prec_reg, region=ex['regionmcK'])[0]
+        
     
     ex['test_ts_prec'] = np.zeros( len(ex['lags']) , dtype=list)
     ex['test_RV'] = np.zeros( len(ex['lags']) , dtype=list)
@@ -165,6 +171,10 @@ def only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
         
         Prec_test_reg = Prec_reg.isel(time=test['Prec_test_idx'])
         ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex)
+    SCORE.AUC_logit, SCORE.KSS_logit, SCORE.brier_logit, metrics_lg = get_metrics_sklearn(SCORE, 
+                                        SCORE.y_true_test, SCORE.logit_test, n_boot=10000)
+    SCORE.AUC_spatcov, SCORE.KSS_spatcov, SCORE.brier_spatcov, metrics_sp = get_metrics_sklearn(SCORE, 
+                                        SCORE.y_true_test, SCORE.Prec_test, n_boot=10000)
 #    ex['score'] = 
     #%%
     return ex, SCORE
@@ -174,86 +184,147 @@ def create_validation_plot(outdic_folders, metric='AUC'):
 #    from time_series_analysis import subplots_df
     #%%
     # each folder will become a single df to plot
-    import numpy as np, scipy.stats as st
-    from scipy.stats import kstest
-    from scipy.stats import ks_2samp
+    
+    def get_data_PEP(datafolder):
+        if datafolder == 'era5':
+            folder = ('/Users/semvijverberg/surfdrive/McKinRepl/'
+                      'era5_PEP_T2mmax_sst_PEPrectangle/'
+                      'random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_1rmCPPA_2019-05-28/'
+                      'lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p')
+            
+        dic = np.load(os.path.join(folder, filename+'.npy'),  encoding='latin1').item()
+        ex = dic['ex']
+        scorecl_PEP = ex['score']
+        return scorecl_PEP
+        
+#    import numpy as np, scipy.stats as st
+#    from scipy.stats import kstest
+#    from scipy.stats import ks_2samp
     # ks_2samp(scorecl.AUC[lag], ROC_array[-1])
     scoreclasses  = {}
     df_series     = []
     datasets      = []
     for folder in outdic_folders:
-        filename = 'output_main_dic'
+        filename = 'output_main_dic_with_score'
         dic = np.load(os.path.join(folder, filename+'.npy'),  encoding='latin1').item()
         ex = dic['ex']
         scoreclasses[ex['datafolder']] = ex['score']
         df_series.append( ex['score'].AUC.mean(0).values )
         datasets.append( ex['datafolder'] )
+    
     df = pd.DataFrame(np.concatenate(np.array(df_series)[None,:], axis=0),
-                      index=datasets, columns=ex['lags'])
+                      index=None, columns=ex['lags'])
+    df['dataset'] = pd.Series(datasets, index=df.index)
 
-    if metric == 'AUC':
-        y_lim = (0.3,1)
-    elif metric == 'KSS':    
-        y_lim = (-1,1)
-    lags_f = np.array(ex['lags']) - 0.5
-    lags_s = np.array(ex['lags']) + 0.5
-    g = sns.FacetGrid(df, row=len(datasets)-1, size=7, aspect=1.4,
-                      ylim=y_lim)
+
+    y_lim = (0.5,1)
+    y_lim2 = (0.0, 0.4)
+    g = sns.FacetGrid(df, col='dataset', size=5, aspect=1.4, ylim=y_lim,
+                      sharex=True,  sharey=False, col_wrap=2)
+    g.fig.subplots_adjust(wspace=0.3)
+                      
+    
+                     
+                      
     for i, ax in enumerate(g.axes.flatten()):
-        name = datasets[0]
-        scorecl = scoreclasses[name]
-        if metric == 'AUC':
-            score_metric = scorecl.AUC
-            boot = scorecl.ROC_boot
-        elif metric == 'KSS':
-            score_metric = scorecl.KSS
-            boot = scorecl.KSS_boot
         
-        
-        
-        # random shuffle
-        conf_int = np.empty( (2, len(ex['lags']) ) )
-        if boot.size!=0:
-            ROC_array = np.zeros( (len(ex['lags']),boot.shape[0]*boot.shape[2]) )
-            for l, lag in enumerate(ex['lags']):
+        dataset = datasets[i]
+        scorecl = scoreclasses[dataset]
+        try:
+            score_PEP = get_data_PEP(dataset)
+        except:
+            pass
 
-                ROC_array[l] = np.concatenate(boot[:,l,:], axis=0)
-                a = ROC_array[l]
-                con = st.t.interval(0.95, len(a)-1, loc=np.mean(a), scale=st.sem(a))
-                conf_int[:,l] = con
-            ax.fill_between(ex['lags'], conf_int[0], conf_int[1], linestyle='solid', 
-                        edgecolor='black', facecolor='blue', alpha=0.5)
-            ax.plot(ex['lags'], np.median(ROC_array, axis=1), color='blue', 
-                    linewidth=2, label='Bootstrapping')
-            ax.boxplot(ROC_array.T, positions=lags_s, widths=2)
-        
-        # mean AUC and error?
-        conf_int = np.empty( (2, len(ex['lags']) ) )
-        for l, lag in enumerate(ex['lags']):
-            # kolmogorov-smirnovtoets
-            a = score_metric[lag]
-            Ks = kstest(a, 'norm')
-            if Ks.pvalue > 0.05: print('lag {} distibution is not normal'.format(lag))
-            con = st.t.interval(0.95, len(a)-1, loc=np.mean(a), scale=st.sem(a))
-            conf_int[:,l] = con
+        try:
             
-        ax.fill_between(ex['lags'], conf_int[0], conf_int[1], linestyle='solid', 
-                        edgecolor='black', facecolor='red', alpha=0.5)
+            AUC_spatcov = scorecl.AUC_spatcov
+            AUC_logit = scorecl.AUC_logit        
+            AUC_spatcov_PEP     = score_PEP.AUC_spatcov
+            AUC_logit_PEP     = score_PEP.AUC_logit             
 
-        median_score = score_metric.median(axis=0)
+            brier_spatcov = scorecl.brier_spatcov
+            brier_logit = scorecl.brier_logit   
+            brier_spatcov_PEP = score_PEP.brier_spatcov
+            brier_logit_PEP   = score_PEP.brier_logit
+        except:
+            AUC_spatcov, KSS_spatcov, brier_spatcov, metrics_sp = get_metrics_sklearn(scorecl, 
+                                    scorecl.y_true_test, scorecl.Prec_test, n_boot=10000)
+            AUC_logit, KSS_logit, brier_logit, metrics_lg = get_metrics_sklearn(scorecl, 
+                                    scorecl.y_true_test, scorecl.logit_test, n_boot=10000)
 
-        ax.plot(ex['lags'], median_score, color='red', 
-                linewidth=2, label='k-fold validation {}'.format(metric))
+        if metric=='AUC':
+            score_spatcov       = AUC_spatcov
+            score_logit         = AUC_logit
+            score_spatcov_PEP   = AUC_spatcov_PEP
+            score_logit_PEP     = AUC_logit_PEP
+        elif metric=='brier':
+            score_spatcov       = brier_spatcov
+            score_logit         = brier_logit
+            score_spatcov_PEP   = brier_spatcov_PEP
+            score_logit_PEP     = brier_logit_PEP
+
         
-        ax.boxplot(score_metric.T, positions=lags_f, widths=2)
+        # spatcov CPPA
+        score_toplot = score_spatcov
+        ax.set_title(dataset)
+        ax.set_ylabel('AUC score')
+        color = 'red'
+        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+                        edgecolor='black', facecolor=color, alpha=0.5)
+        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed',
+                linewidth=2, label='AUC: spatcov Prec. Pattern' )        
+        
+        # logit CPPA
+        score_toplot = score_logit
+        color = 'orange'
+        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+                        edgecolor='black', facecolor=color, alpha=0.5)
+        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed', 
+                linewidth=2, label='AUC: Prec. Pattern logit' ) 
+
+        # spatcov PEP
+        score_toplot = score_spatcov_PEP
+        color = 'blue'
+        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+                        edgecolor='black', facecolor=color, alpha=0.5)
+        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed', 
+                linewidth=2, label='AUC: spatcov PEP' ) 
+
+        # logit PEP
+        score_toplot = score_logit_PEP
+        color = 'purple'
+        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+                        edgecolor='black', facecolor=color, alpha=0.5)
+        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed', 
+                linewidth=2, label='AUC: PEP logit' ) 
+
+#        # spatcov brier
+#        ax2 = ax.twinx()
+#        ax2.set_ylim(y_lim2)
+#        ax2.set_ylabel('brier score')
+#        score_toplot = brier_spatcov
+#        ax2.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+#                        edgecolor='black', facecolor='red', alpha=0.5)
+#        ax2.plot(ex['lags'], score_toplot.iloc[0], color='red', 
+#                linewidth=2, label='brier loss score: spatcov Prec. Pattern' )       
+#        
+##        # logit brier
+#        score_toplot = brier_logit
+#        ax2.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+#                        edgecolor='black', facecolor='blue', alpha=0.5)
+#        ax2.plot(ex['lags'], score_toplot.iloc[0], color='blue', 
+#                linewidth=2, label='brier loss score: logit' )  
+        
+        
     
         ax.set_xlim(min(ex['lags'])-5,max(ex['lags'])+5)
         ax.set_xticks(ex['lags'])  
         ax.set_xticklabels(ex['lags'])        
-        ax.legend()
+        ax.legend(loc=2)
+        ax2.legend(loc=1)
     
     lags_str = str(ex['lags']).replace(' ', '')
-    fname = 'validation_plot_{}_{}'.format(lags_str, metric)
+    fname = 'validation_plot_{}'.format(lags_str)
     filename = os.path.join(ex['figpathbase'], ex['CPPA_folder'], fname)
     g.fig.savefig(fname ,dpi=250, frameon=True)
     #%%
@@ -278,11 +349,16 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
 
         var_test_reg = Prec_test_reg.sel(time=dates_min_lag)        
 
-        if ex['use_ts_logit'] == False:
+        if ex['use_ts_logit'] == False and SCORE.PEPpattern == False:
             # weight by robustness of precursors
             var_test_reg = var_test_reg * ds_Sem['weights'].sel(lag=lag)
             crosscorr_Sem = func_CPPA.cross_correlation_patterns(var_test_reg, 
                                                             ds_Sem['pattern_CPPA'].sel(lag=lag))
+        elif ex['use_ts_logit'] == False and SCORE.PEPpattern == True:
+            var_patt_mcK = func_CPPA.find_region(ds_Sem['pattern'].sel(lag=lag), 
+                                                 region=ex['regionmcK'])[0]
+            crosscorr_Sem = func_CPPA.cross_correlation_patterns(var_test_reg, 
+                                                            var_patt_mcK)
         elif ex['use_ts_logit'] == True:
             crosscorr_Sem = ds_Sem['ts_prediction'][lag_idx]
 
@@ -434,14 +510,24 @@ def get_statistics_train(RV_ts_train, ds_Sem, Prec_train_reg, SCORE, ex):
 
         var_train_reg = Prec_train_reg.sel(time=dates_min_lag)   
         
-        if ex['use_ts_logit'] == False:
+        if ex['use_ts_logit'] == False and SCORE.PEPpattern == False:
             # weight by robustness of precursors
             var_train_reg = var_train_reg * ds_Sem['weights'].sel(lag=lag)
             spatcov = func_CPPA.cross_correlation_patterns(var_train_reg, 
                                                             ds_Sem['pattern_CPPA'].sel(lag=lag))
+        elif ex['use_ts_logit'] == False and SCORE.PEPpattern == True:
+            var_patt_mcK = func_CPPA.find_region(ds_Sem['pattern'].sel(lag=lag), 
+                                                 region=ex['regionmcK'])[0]
+            spatcov = func_CPPA.cross_correlation_patterns(var_train_reg, 
+                                                            var_patt_mcK)       
         elif ex['use_ts_logit'] == True:
             spatcov = ds_Sem['ts_prediction'][lag_idx]
-            
+
+    
+
+        
+        
+        
         SCORE.Prec_train_mean[ex['n'],lag_idx] = spatcov.mean().values
         SCORE.Prec_train_std[ex['n'],lag_idx]  = spatcov.std().values
         
@@ -818,24 +904,61 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         plt.show()
         #%%
 
-def get_AUC(SCORE, y_true, prec_test, alpha=0.05, n_boot=5):
+def get_metrics_sklearn(SCORE, y_true, prec_test, alpha=0.05, n_boot=5):
     df_auc = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
                           index=['AUC', 'con_low', 'con_high'])
+    df_KSS = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
+                          index=['KSS', 'con_low', 'con_high'])
+    
+    df_brier = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
+                          index=['Brier', 'con_low', 'con_high'])
+    
     for lag in SCORE._lags:
-        AUC_score, conf_lower, conf_upper, sorted_scores = AUC_sklearn(
+        metrics = metrics_sklearn(
                     y_true[lag], prec_test[lag], 
                     alpha=alpha, n_bootstraps=n_boot)
+        # AUC
+        AUC_score, conf_lower, conf_upper, sorted_AUC = metrics['AUC']
         df_auc[lag] = (AUC_score, conf_lower, conf_upper) 
-    return df_auc, sorted_scores
+        # HKSS
+        KSS_score, ci_low_KSS, ci_high_KSS, sorted_KSSs = metrics['KSS']
+        df_KSS[lag] = (KSS_score, ci_low_KSS, ci_high_KSS)
+        # Brier score
+        brier_score, ci_low_brier, ci_high_brier, sorted_briers = metrics['brier']
+        df_brier[lag] = (brier_score, ci_low_brier, ci_high_brier)
+    return df_auc, df_KSS, df_brier, metrics
 
-def AUC_sklearn(y_true, y_pred, alpha=0.05, n_bootstraps=5):
+
+def get_KSS_clim(y_true, y_pred, threshold_clim_events):
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred)
+    idx_clim_events = np.argmin(abs(thresholds[::-1] - threshold_clim_events))
+    KSS_score = tpr[idx_clim_events] - fpr[idx_clim_events]
+    return KSS_score 
+
+def metrics_sklearn(y_true, y_pred, alpha=0.05, n_bootstraps=5):
     
+    
+    metrics = {}
     AUC_score = roc_auc_score(y_true, y_pred)
+
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred)
+    threshold_clim_events = np.sort(y_pred)[::-1][y_true[y_true>0.5].size]
+    
+    KSS_score = get_KSS_clim(y_true, y_pred, threshold_clim_events)
+
+    
+    if y_pred.max() > 1:
+        y_prob = (y_pred+abs(y_pred.min()))/( y_pred.max()+abs(y_pred.min()) )
+    else:
+        y_prob = y_pred
+    brier_score = brier_score_loss(y_true, y_prob)
+    
     print("Original ROC area: {:0.3f}".format(AUC_score))
     
-    n_bootstraps = 1000
     rng_seed = 42  # control reproducibility
-    bootstrapped_scores = []
+    bootstrapped_AUC = []
+    bootstrapped_KSS = []
+    bootstrapped_brier = []    
     
     rng = np.random.RandomState(rng_seed)
     for i in range(n_bootstraps):
@@ -846,18 +969,52 @@ def AUC_sklearn(y_true, y_pred, alpha=0.05, n_bootstraps=5):
             # to be defined: reject the sample
             continue
     
-        score = roc_auc_score(y_true[indices], y_pred[indices])
-        bootstrapped_scores.append(score)
+        score_AUC = roc_auc_score(y_true[indices], y_pred[indices])
+        score_KSS = get_KSS_clim(y_true[indices], y_pred[indices], threshold_clim_events)
+        score_brier = brier_score_loss(y_true[indices], y_prob[indices])
+        
+        bootstrapped_AUC.append(score_AUC)
+        bootstrapped_KSS.append(score_KSS)
+        bootstrapped_brier.append(score_brier)
 #        print("Bootstrap #{} ROC area: {:0.3f}".format(i + 1, score))
-    
-    sorted_scores = np.array(bootstrapped_scores)
-    sorted_scores.sort()
-    
+
     # Computing the lower and upper bound of the 90% confidence interval
     # You can change the bounds percentiles to 0.025 and 0.975 to get
     # a 95% confidence interval instead.
-    confidence_lower = sorted_scores[int(alpha * len(sorted_scores))]
-    confidence_upper = sorted_scores[int((1-alpha) * len(sorted_scores))]
+    def get_ci(bootstrapped, alpha=alpha):
+        sorted_scores = np.array(bootstrapped)
+        sorted_scores.sort()
+        ci_low = sorted_scores[int(alpha * len(sorted_scores))]
+        ci_high = sorted_scores[int((1-alpha) * len(sorted_scores))]
+        return ci_low, ci_high, sorted_scores
+    
+    ci_low_AUC, ci_high_AUC, sorted_AUCs = get_ci(bootstrapped_AUC, alpha)
+    
+    ci_low_KSS, ci_high_KSS, sorted_KSSs = get_ci(bootstrapped_KSS, alpha)
+    
+    ci_low_brier, ci_high_brier, sorted_briers = get_ci(bootstrapped_brier, alpha)
+    
+   
+    metrics['AUC'] = (AUC_score, ci_low_AUC, ci_high_AUC, sorted_AUCs)
+    metrics['KSS'] = (KSS_score, ci_low_KSS, ci_high_KSS, sorted_KSSs)
+    metrics['brier'] = (brier_score, ci_low_brier, ci_high_brier, sorted_briers)
 #    print("Confidence interval for the score: [{:0.3f} - {:0.3}]".format(
 #        confidence_lower, confidence_upper))
-    return AUC_score, confidence_lower, confidence_upper, sorted_scores
+    
+    return metrics
+
+
+def get_logit_stat(SCORE, ex):
+    log_models = SCORE.logitmodel
+    pval = np.zeros( log_models.shape )
+    odds = np.zeros( log_models.shape )
+    for n in range(ex['n_conv']):
+        
+        for i, l in enumerate(ex['lags']):
+            model = log_models[n,i]
+            pval[n,i] = model.pvalues
+            odds[n,i] = np.exp(model.params)
+    SCORE.df_pval = pd.DataFrame(pval, columns=[ex['lags']])
+    SCORE.df_odds = pd.DataFrame(odds, columns=[ex['lags']])
+    return SCORE
+            

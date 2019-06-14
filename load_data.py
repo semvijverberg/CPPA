@@ -23,40 +23,59 @@ def load_data(ex):
     print('\nimportRV_1dts is true, so the 1D time serie given with name \n'
               '{} is imported.'.format(ex['RVts_filename']))
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-    dicRV = np.load(filename,  encoding='latin1', allow_pickle=True).item()
-    try:    
-        RVtsfull = dicRV['RVfullts95']
-    except:
-        RVtsfull = dicRV['RVfullts']
-    if ex['datafolder'] == 'ERAint':
-        try:
-            ex['mask'] = dicRV['RV_array']['mask']
+    if ex['RVts_filename'][-4:] == '.npy':
+        
+        dicRV = np.load(filename,  encoding='latin1', allow_pickle=True).item()
+        try:    
+            RVtsfull = dicRV['RVfullts95']
         except:
+            RVtsfull = dicRV['RVfullts']
+        if ex['datafolder'] == 'ERAint':
+            try:
+                ex['mask'] = dicRV['RV_array']['mask']
+            except:
+                ex['mask'] = dicRV['mask']
+        elif ex['datafolder'] == 'era5':
             ex['mask'] = dicRV['mask']
-    elif ex['datafolder'] == 'era5':
-        ex['mask'] = dicRV['mask']
-    if ex['datafolder'] == 'ERAint' or ex['datafolder'] == 'era5':
-        func_CPPA.xarray_plot(ex['mask'])
-        lpyr = False
-    else:
-        lpyr = True
-    RVhour   = RVtsfull.time[0].dt.hour.values
-    datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
-                                    ex['startyear'], ex['endyear'], lpyr=lpyr)
-  
+        if ex['datafolder'] == 'ERAint' or ex['datafolder'] == 'era5':
+            func_CPPA.xarray_plot(ex['mask'])
 
-    
-    # Load in external ncdf
-    
-    dates_prec = subset_dates(datesRV, ex)
+        RVhour   = RVtsfull.time[0].dt.hour.values
+        lpyr = False
+    else:  
+        lpyr = True
+        RVtsfull = csv_to_xarray(ex, filename, delim_whitespace=False, header=None)
+        RVhour   = RVtsfull.time[0].dt.hour.values
+
+    datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
+                            ex['startyear'], ex['endyear'], lpyr=lpyr)
+    # =============================================================================
+    # Load Precursor     
+    # =============================================================================
     prec_filename = os.path.join(ex['path_pp'], ex['filename_precur'])
     if ex['datafolder'] == 'EC':
-        varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
+        try:
+            datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
+                            ex['startyear'], ex['endyear'], lpyr=False)
+            dates_prec = subset_dates(datesRV, ex)
+            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
+        except:
+            datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
+                                    ex['startyear'], ex['endyear'], lpyr=True)
+            dates_prec = subset_dates(datesRV, ex)
+            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
     else:
         varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, loadleap=True)
+    
+    # =============================================================================
+    # Ensure same longitude  
+    # =============================================================================
     if varfullgl.longitude.min() < -175 and varfullgl.longitude.max() > 175:
         varfullgl = func_CPPA.convert_longitude(varfullgl, 'only_east')
 
+    # =============================================================================
+    # Select a focus region  
+    # =============================================================================
     Prec_reg = func_CPPA.find_region(varfullgl, region=ex['region'])[0]
     
     if ex['tfreq'] != 1:
@@ -87,7 +106,7 @@ def load_data(ex):
         Prec_reg = Prec_reg.where(mask_reg==True)
 #        xarray_plot(Prec_reg[0])
     
-    if ex['rollingmean'][0] == 'RV':
+    if ex['rollingmean'][0] == 'RV' and ex['rollingmean'][1] != 1:
         RVtsfull = func_CPPA.rolling_mean_time(RVtsfull, ex, center=True)
     
     if 'exclude_yrs' in ex.keys():
@@ -156,3 +175,19 @@ def make_dates(datetime, start_yr, breakyr=None):
         if next_yr[-1].year == breakyr:
             break
     return start_yr
+
+def csv_to_xarray(ex, path, delim_whitespace=True, header='infer'):
+    '''ATTENTION: This only works if values are in last column'''
+   # load data from csv file and save to .npy as xarray format
+   
+#    path = os.path.join(ex['path_pp'], 'RVts', ex['RVts_filename'])
+    table = pd.read_csv(path, sep=',', delim_whitespace=delim_whitespace, header=header )
+    if str(table.columns[0]).lower() == 'year':
+        dates = pd.to_datetime(['{}-{}-{}'.format(r[0],r[1],r[2]) for r in table.iterrows()])
+    elif len(table.iloc[0][0].split('-')) >= 2:
+        dates = pd.to_datetime(table.values.T[0])
+        
+    y_val = np.array(table.values[:,-1], dtype='float32')  
+
+    xrdata = xr.DataArray(data=y_val, coords=[dates], dims=['time'])
+    return xrdata

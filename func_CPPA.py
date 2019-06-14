@@ -573,21 +573,35 @@ def func_dates_min_lag(dates, lag):
 
 def rand_traintest(RV_ts, Prec_reg, ex):
     #%%
+    
+    
+    
     if ex['n'] == 0: ex['tested_yrs'] = [] ; ex['n_events'] = []
-    ex['all_yrs'] = np.unique(RV_ts.time.dt.year)
-#    if ex['datafolder']
+    ex['all_yrs'] = list(np.unique(RV_ts.time.dt.year))
+    
+    if ex['datafolder'] == 'ERAint': ex['all_yrs'].append(2018)
+    
     tol_from_exp_events = 0.35
+
+    if ex['method'][:6] == 'random':
+        if 'seed' not in ex.keys():
+            ex['seed'] = 30 # control reproducibility train/test split
+        else:
+            ex['seed'] = ex['seed']
+        rng = np.random.RandomState(ex['seed'])
     
     
     # conditions failed initally assumed True
     a_conditions_failed = True
     count = 0
+
     while a_conditions_failed == True:
         count +=1
         a_conditions_failed = False
-        # Divide into random sampled 25 year for train & rest for test
-    #        n_years_sampled = int((ex['endyear'] - ex['startyear']+1)*0.66)
+
+
         if ex['method'][:6] == 'random':
+
             
             size_test  = int(np.round(ex['n_yrs'] / int(ex['method'][6:8])))
             size_train = int(ex['n_yrs'] - size_test)
@@ -595,7 +609,7 @@ def rand_traintest(RV_ts, Prec_reg, ex):
             ex['leave_n_years_out'] = size_test
             yrs_to_draw_sample = [yr for yr in ex['all_yrs'] if yr not in flatten(ex['tested_yrs'])]
             if (len(yrs_to_draw_sample)) >= size_test:
-                rand_test_years = np.random.choice(yrs_to_draw_sample, ex['leave_n_years_out'], replace=False)
+                rand_test_years = rng.choice(yrs_to_draw_sample, ex['leave_n_years_out'], replace=False)
             # if last test sample will be too small for next iteration, add test yrs to current test yrs
             if (len(yrs_to_draw_sample)) < size_test:
                 rand_test_years = yrs_to_draw_sample  
@@ -619,6 +633,11 @@ def rand_traintest(RV_ts, Prec_reg, ex):
             ex['leave_n_years_out'] = size_test
             print('Using {} years to train and {} to test'.format(size_train, size_test))
             rand_test_years = ex['all_yrs'][-size_test:]
+        
+        # remove 2018 again
+        if ex['datafolder'] == 'ERAint' and 2018 in rand_test_years:
+            ex['all_yrs'] = np.unique(RV_ts.time.dt.year)
+            rand_test_years = [y for y in rand_test_years if y != 2018]
         
             
         # test duplicates
@@ -657,6 +676,7 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         
         if diff > tolerance and ex['method'][:6] == 'random' and ex['n'] != ex['n_conv']-1: 
             print('not a representative sample drawn, drawing new sample')
+            ex['seed'] += 1 # next random sample
             a_conditions_failed = True
         else:
             print('{}: test year is {}, with {} events'.format(ex['n'], test_years, len(event_test)))
@@ -666,6 +686,7 @@ def rand_traintest(RV_ts, Prec_reg, ex):
             tol_from_exp_events = 0.40
         if count == 10:
             print(f"kept sample after {count+1} attempts")
+            print('{}: test year is {}, with {} events'.format(ex['n'], test_years, len(event_test)))
             a_conditions_failed = False
                    
     ex['tested_yrs'].append(test_years)
@@ -1862,14 +1883,15 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     it will also start to cluster together regions with similar coordinates.
     '''
     #%%
-    if ex['n_conv'] < 30:
-        grouping = 'group_across_test_and_lags'
+#    if ex['n_conv'] < 30:
+#        grouping = 'group_across_test_and_lags'
 #    grouping = 'group_accros_tests_single_lag'
 #    grouping =  'group_across_test_and_lags'
     # Precursor Regions Dimensions
     all_lags_in_exp = l_ds[0]['pat_num_CPPA'].sel(lag=ex['lags']).lag.values
     lags_ind        = np.reshape(np.argwhere(all_lags_in_exp == ex['lags']), -1)
     PRECURSOR_DATA = np.array([data['pat_num_CPPA'].values for data in l_ds])
+    PRECURSOR_VALUES = np.array([data['pattern_CPPA'].values for data in l_ds])
     PRECURSOR_DATA = PRECURSOR_DATA[:,lags_ind]
     PRECURSOR_LONGITIUDE = l_ds[0]['pat_num_CPPA'].longitude.values
     PRECURSOR_LATITUDE = l_ds[0]['pat_num_CPPA'].latitude.values
@@ -1912,18 +1934,29 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
             # evaluate regions
     #            plt.figure()
     #            plt.imshow(indices == region_idx)
+                region = precursor_indices[test_idx, lag_idx, indices == region_idx]
+                size_reg = region.size
+                sign_reg = np.sign(PRECURSOR_VALUES[test_idx, lag_idx, indices == region_idx])
                 precursor_indices[test_idx, lag_idx, indices == region_idx] = int(region_idx)
-                precursor_coordinates.append((
-                        [test_idx, lag_idx, int(region_idx)], PRECURSOR_GRID[indices == region_idx].mean(0)))
+                if sign_reg.mean() == 1:
+                    lon_lat = PRECURSOR_GRID[indices == region_idx].mean(0)
+                elif sign_reg.mean() == -1:
+                    lon_lat = PRECURSOR_GRID[indices == region_idx].mean(0) * -1
+                if np.isnan(lon_lat).any()==False:
+
+                    precursor_coordinates.append((
+                        [test_idx, lag_idx, int(region_idx)], lon_lat, size_reg))
     
         # Group Similar Precursor Regions Together across years for same lag
-        precursor_coordinates_index = np.array([index for index, coord in precursor_coordinates])
-        precursor_coordinates_coord = np.array([coord for index, coord in precursor_coordinates])
+        precursor_coordinates_index = np.array([index for index, coord, size in precursor_coordinates])
+        precursor_coordinates_coord = np.array([coord for index, coord, size in precursor_coordinates])
+        precursor_coordinates_weight = np.array([size for index, coord, size in precursor_coordinates])
         
         if grouping == 'group_accros_tests_single_lag':
-            # Higher min_samples or lower eps indicate higher density necessary to form a cluster.
-            min_s = np.nanmin(min_samples)
-            precursor_coordinates_group = DBSCAN(min_samples=min_s, eps=eps).fit_predict(precursor_coordinates_coord) + 2
+            # min_samples to form core cluster, lower eps indicate higher density necessary to form a cluster.
+            min_s = min_s = ex['n_conv'] * len(ex['lags']) / 2 #np.nanmin(min_samples)
+            precursor_coordinates_group = DBSCAN(min_samples=ex['n_conv'] * 0.4, eps=eps).fit_predict(
+                    precursor_coordinates_coord, sample_weight = precursor_coordinates_weight) + 2
             
             for (year_idx, lag_idx, region_idx), group in zip(precursor_coordinates_index, precursor_coordinates_group):
                 precursor_indices_new[year_idx, lag_idx, precursor_indices[year_idx, lag_idx] == region_idx] = group
@@ -1931,11 +1964,13 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
     
     if grouping == 'group_across_test_and_lags':
         # Group Similar Precursor Regions Together
-        min_s = np.nanmax(PRECURSOR_DATA)
-        precursor_coordinates_index = np.array([index for index, coord in precursor_coordinates])
-        precursor_coordinates_coord = np.array([coord for index, coord in precursor_coordinates])
+        min_s = ex['n_conv'] * len(ex['lags']) / 2#np.nanmax(PRECURSOR_DATA)
+        precursor_coordinates_index = np.array([index for index, coord, size in precursor_coordinates])
+        precursor_coordinates_coord = np.array([coord for index, coord, size in precursor_coordinates])
+        precursor_coordinates_weight = np.array([size for index, coord, size in precursor_coordinates])
 
-        precursor_coordinates_group = DBSCAN(min_samples=min_s, eps=eps).fit_predict(precursor_coordinates_coord) + 2
+        precursor_coordinates_group = DBSCAN(min_samples=min_s, eps=eps).fit_predict(
+                precursor_coordinates_coord, sample_weight = precursor_coordinates_weight) + 2
         
         
         precursor_indices_new = np.zeros_like(precursor_indices)
@@ -1944,10 +1979,26 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
             precursor_indices_new[year_idx, lag_idx, precursor_indices[year_idx, lag_idx] == region_idx] = group
         precursor_indices_new[precursor_indices_new==0.] = np.nan
         
+    # couting groups
+    counting = {}
+    for r in precursor_coordinates_group:
+        c = list(precursor_coordinates_group).count(r)
+        counting[r] =c
+    # sort by counts:
+    order_count = dict(sorted(counting.items(), key = 
+             lambda kv:(kv[1], kv[0]), reverse=True))
     
-    # replace values in PRECURSOR_DATA
-    PRECURSOR_DATA[:,:,:,:] = precursor_indices_new[:,:,:,:]
-    ex['uniq_regs_lag'][lag_idx] = max(np.unique(precursor_coordinates_group) )
+    precursor_indices_new_ord = np.zeros_like(precursor_indices)
+#    if grouping == 'group_across_test_and_lags':
+    for i, r in enumerate(order_count.keys()):
+        precursor_indices_new_ord[precursor_indices_new==r] = i+1
+    precursor_indices_new_ord[precursor_indices_new_ord==0.] = np.nan
+    # replace values in PRECURSOR_DATA|
+    PRECURSOR_DATA[:,:,:,:] = precursor_indices_new_ord[:,:,:,:]
+#    else:
+#        PRECURSOR_DATA[:,:,:,:] = precursor_indices_new
+    
+    ex['uniq_regs_lag'][lag_idx] = max(np.unique(precursor_indices_new_ord) )
     
     
     l_ds_new = []
@@ -1976,31 +2027,61 @@ def grouping_regions_similar_coords(l_ds, ex, grouping = 'group_accros_tests_sin
 
 def plot_precursor_regions(l_ds, n_tests, key_pattern_num, lags, subtitles, ex):
     #%%
+    import seaborn as sns
     if len(lags) >= 2:
         adjust_vert_cbar = 0.0
     elif len(lags) < 2:
         adjust_vert_cbar = -0.06
+
+    subfolder = os.path.join('', 'intermediate_results')
+    
+    lats = l_ds[0].latitude
+    lons = l_ds[0].longitude
+    array = np.zeros( (len(l_ds), len(lags), len(lats), len(lons)) )
+    pattern_num = xr.DataArray(data=array, coords=[range(len(l_ds)), lags, lats, lons], 
+                      dims=['n_tests', 'lag','latitude','longitude'], 
+                      name=key_pattern_num, attrs={'units':'Precursor Region labels'})
+    
+    reg_labels = []
+    for n in np.linspace(0, ex['n_conv']-1, n_tests, dtype=int): 
+        pattern_num[n] = l_ds[n][key_pattern_num].sel(lag=lags) 
+        for i,l in enumerate(lags):
+            labels = np.unique(pattern_num[n].sel(lag=l))
+            labels = labels[~np.isnan(labels)]            
+            reg_labels.append( labels )
+    counting = {}
+    for r in np.unique(flatten(reg_labels)):
+        key = flatten(reg_labels).count(r)
+        counting[key] = r
+    ex['max_N_regs'] = 1
+    for k in counting.keys():
+        if k > 0.5 * ex['n_conv'] * len(lags):
+            ex['max_N_regs'] = int(counting[k]) + 1    
     
     for n in np.linspace(0, ex['n_conv']-1, n_tests, dtype=int): 
-        subfolder = os.path.join('', 'intermediate_results')
         years = ex['tested_yrs']
         yr = years[n]
-    
-        pattern_num_init = l_ds[n][key_pattern_num].sel(lag=lags) 
-        pattern_num_init.attrs['title'] = ('Precursor Regions - test yr(s): {}'.format(yr ))
+        for_plt = pattern_num[n]
         file_name = '{}_{}_{}_{}'.format(key_pattern_num, lags, n, yr )
         filename = os.path.join(subfolder, file_name.replace(
                                 ' ','_')+'.png')
-        for_plt = pattern_num_init.copy()
+        for_plt.attrs['title'] = ('Precursor Regions - test yr(s): {}'.format(yr ))
+#        for_plt = for_plt.where(for_plt.values <= ex['max_N_regs'])
+        mask_noise = np.nan_to_num(for_plt.values) >=  ex['max_N_regs']
+        for_plt.values[mask_noise] = ex['max_N_regs']
+#        ex['max_N_regs'] = int(pattern_num.max()) +1
+#        from matplotlib.colors import ListedColormap
+#        cmap = ListedColormap(sns.color_palette("Paired", ex['max_N_regs']))
+        cmap = plt.cm.tab20
         for_plt.values = for_plt.values-0.5
         
-        if 'max_N_regs' not in ex.keys() or key_pattern_num == 'pat_num_CPPA':
-            ex['max_N_regs'] = int(for_plt.max() + 0.5)
-        
+#        if 'max_N_regs' not in ex.keys() or key_pattern_num == 'pat_num_CPPA':
+#        ex['max_N_regs'] = int(pattern_num.max() + 0.5)
+
         kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
-                       'steps' : ex['max_N_regs']+1, 'subtitles': subtitles,
+                       'steps' : ex['max_N_regs']+1, 'subtitles': None,
                        'vmin' : 0, 'vmax' : ex['max_N_regs'], 
-                       'cmap' : plt.cm.tab20, 'column' : 1,
+                       'cmap' : cmap, 'column' : 1,
                        'cbar_vert' : adjust_vert_cbar, 'cbar_hght' : 0.0,
                        'adj_fig_h' : 1., 'adj_fig_w' : 1., 
                        'hspace' : 0.2, 'wspace' : 0.08,
@@ -2296,7 +2377,17 @@ def finalfigure(xrdata, file_name, kwrgs):
         
         clevels = np.linspace(vmin, vmax,kwrgs['steps'])
 
-    cmap = kwrgs['cmap']
+    cmap_ = kwrgs['cmap']
+    
+    if 'clim' in kwrgs.keys(): #adjust the range of colors shown in cbar
+        cnorm = np.linspace(kwrgs['clim'][0],kwrgs['clim'][1],11)
+        vmin = kwrgs['clim'][0]
+    else:
+        cnorm = clevels
+        
+
+    norm = mpl.colors.BoundaryNorm(boundaries=cnorm, ncolors=256)
+    subplot_kws = {'projection': map_proj}
     
     n_plots = xrdata[var].size
     for n_ax in np.arange(0,n_plots):
@@ -2307,15 +2398,15 @@ def finalfigure(xrdata, file_name, kwrgs):
         else:
             plotdata = xrdata[n_ax].squeeze()
         if kwrgs['style_colormap'] == 'pcolormesh':
-            im = plotdata.plot.pcolormesh(ax=ax, cmap=cmap,
+            im = plotdata.plot.pcolormesh(ax=ax, cmap=cmap_,
                                transform=ccrs.PlateCarree(),
-                               subplot_kws={'projection': map_proj},
+                               subplot_kws=subplot_kws,
                                 levels=clevels, add_colorbar=False)
         
         if kwrgs['style_colormap'] == 'contourf':
-            im = plotdata.plot.contourf(ax=ax, cmap=cmap,
+            im = plotdata.plot.contourf(ax=ax, cmap=cmap_,
                                transform=ccrs.PlateCarree(),
-                               subplot_kws={'projection': map_proj},
+                               subplot_kws=subplot_kws,
                                 levels=clevels, add_colorbar=False)
 
         if 'sign_stipling' in kwrgs.keys():
@@ -2344,7 +2435,7 @@ def finalfigure(xrdata, file_name, kwrgs):
             condata.plot.contour(ax=ax, add_colorbar=False,
                                transform=ccrs.PlateCarree(),
                                subplot_kws={'projection': map_proj},
-                                levels=con_levels, cmap=cmap)
+                                levels=con_levels, cmap=cmap_)
             if 'sign_stipling' in kwrgs.keys():
                 if kwrgs['sign_stipling'][0] == 'contour':
                     sigdata = kwrgs['sign_stipling'][1]
@@ -2378,7 +2469,7 @@ def finalfigure(xrdata, file_name, kwrgs):
             ring = get_ring(kwrgs['drawbox'][1])
 #            lons_sq = [-215, -215, -130, -130] #[-215, -215, -125, -125] #[-215, -215, -130, -130] 
 #            lats_sq = [50, 20, 20, 50]
-            if kwrgs['drawbox'][0] == n_ax:
+            if kwrgs['drawbox'][0] == n_ax or kwrgs['drawbox'][0] == 'all':
                 ax.add_geometries([ring], ccrs.PlateCarree(), facecolor='none', edgecolor='green',
                               linewidth=3.5)
         
@@ -2440,21 +2531,16 @@ def finalfigure(xrdata, file_name, kwrgs):
     cbar_ax = g.fig.add_axes([0.25, cbar_vert, 
                                   0.5, cbar_hght], label='cbar')
 
-    if 'clim' in kwrgs.keys(): #adjust the range of colors shown in cbar
-        cnorm = np.linspace(kwrgs['clim'][0],kwrgs['clim'][1],11)
-        vmin = kwrgs['clim'][0]
-    else:
-        cnorm = clevels
 
-    norm = mpl.colors.BoundaryNorm(boundaries=cnorm, ncolors=256)
-    cbar = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap, orientation='horizontal', 
-                 extend=extend, ticks=cnorm, norm=norm)
-    cbar = plt.colorbar(im, cbar_ax, cmap=cmap, orientation='horizontal', 
-                 extend=extend, norm=norm)
+#    cbar = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap, orientation='horizontal', 
+#                 extend=extend, ticks=cnorm, norm=norm)
+
+
+    cbar = plt.colorbar(im, cbar_ax, cmap=cmap_, norm=norm,
+                    orientation='horizontal', 
+                    extend=extend)
 
     if 'cticks_center' in kwrgs.keys():
-        cbar = plt.colorbar(im, cbar_ax, cmap=cmap, orientation='horizontal', 
-                 extend=extend, norm=norm)
         cbar.set_ticks(clevels + 0.5)
         ticklabels = np.array(clevels+1, dtype=int)
         cbar.set_ticklabels(ticklabels, update_ticks=True)
@@ -2462,7 +2548,7 @@ def finalfigure(xrdata, file_name, kwrgs):
     
     if 'extend' in kwrgs.keys():
         if kwrgs['extend'][0] == 'min':
-            cbar.cmap.set_under(cbar.to_rgba(kwrgs['vmin']))
+            cbar.cmap_.set_under(cbar.to_rgba(kwrgs['vmin']))
     cbar.set_label(xrdata.attrs['units'], fontsize=16)
     cbar.ax.tick_params(labelsize=14)
     #%%

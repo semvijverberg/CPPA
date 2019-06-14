@@ -15,6 +15,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import seaborn as sns
 import statsmodels.formula.api as sm
+from statsmodels.api import add_constant
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.metrics import brier_score_loss
 
@@ -48,6 +49,9 @@ class SCORE_CLASS():
                                            columns=ex['lags'], 
                                            index = ex['dates_RV'])
         self.y_true_test        = pd.DataFrame(data=np.zeros( (ex['dates_RV'].size, len(ex['lags']) ) ), 
+                                               columns=ex['lags'], 
+                                           index = ex['dates_RV'])
+        self.y_true_train_clim = pd.DataFrame(data=np.zeros( (ex['dates_RV'].size, len(ex['lags']) ) ), 
                                                columns=ex['lags'], 
                                            index = ex['dates_RV'])
         self.Prec_test      = pd.DataFrame(data=np.zeros( (ex['dates_RV'].size, len(ex['lags']) ) ), 
@@ -170,7 +174,7 @@ def only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
     
         
         Prec_test_reg = Prec_reg.isel(time=test['Prec_test_idx'])
-        ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex)
+        func_AUC_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex)
     SCORE.AUC_logit, SCORE.KSS_logit, SCORE.brier_logit, metrics_lg = get_metrics_sklearn(SCORE, 
                                         SCORE.y_true_test, SCORE.logit_test, n_boot=10000)
     SCORE.AUC_spatcov, SCORE.KSS_spatcov, SCORE.brier_spatcov, metrics_sp = get_metrics_sklearn(SCORE, 
@@ -191,7 +195,13 @@ def create_validation_plot(outdic_folders, metric='AUC'):
                       'era5_PEP_T2mmax_sst_PEPrectangle/'
                       'random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_1rmCPPA_2019-05-28/'
                       'lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p')
-            
+        elif datafolder == 'EC':
+            folder = ('/Users/semvijverberg/surfdrive/MckinRepl/'
+                      'EC_tas_tos_Northern/EC_PEP_tas_tos_PEPrectangle/'
+                      'random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_1rmRV_2019-05-30/'
+                      'lags[0,10,20,30]Ev1d0p')
+        elif datafolder == 'ERAint':
+            ('/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/ERAint_PEP_t2mmax_sst_PEPrectangle/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_1rmRV_2019-05-30/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p')
         dic = np.load(os.path.join(folder, filename+'.npy'),  encoding='latin1').item()
         ex = dic['ex']
         scorecl_PEP = ex['score']
@@ -208,20 +218,27 @@ def create_validation_plot(outdic_folders, metric='AUC'):
         filename = 'output_main_dic_with_score'
         dic = np.load(os.path.join(folder, filename+'.npy'),  encoding='latin1').item()
         ex = dic['ex']
+        if ex['datafolder'] == 'era5':
+            lags = ex['lags']
+            
         scoreclasses[ex['datafolder']] = ex['score']
-        df_series.append( ex['score'].AUC.mean(0).values )
+        AUC_means = ex['score'].AUC.mean(0)
+        AUC_values = [AUC_means[l] if l in ex['lags'] else 0 for l in lags ]
+        df_series.append( AUC_values )
         datasets.append( ex['datafolder'] )
     
     df = pd.DataFrame(np.concatenate(np.array(df_series)[None,:], axis=0),
-                      index=None, columns=ex['lags'])
+                      index=None, columns=lags)
     df['dataset'] = pd.Series(datasets, index=df.index)
 
 
-    y_lim = (0.5,1)
-    y_lim2 = (0.0, 0.4)
-    g = sns.FacetGrid(df, col='dataset', size=5, aspect=1.4, ylim=y_lim,
-                      sharex=True,  sharey=False, col_wrap=2)
-    g.fig.subplots_adjust(wspace=0.3)
+    if metric=='AUC':
+        y_lim = (0.5,1)
+    elif metric=='brier':
+        y_lim = (-0.3,0.3)
+    g = sns.FacetGrid(df, col='dataset', size=6, aspect=1.4, ylim=y_lim,
+                      sharex=False,  sharey=False, col_wrap=3)
+    g.fig.subplots_adjust(wspace=0.1)
                       
     
                      
@@ -264,76 +281,105 @@ def create_validation_plot(outdic_folders, metric='AUC'):
             score_logit_PEP     = brier_logit_PEP
 
         
-        # spatcov CPPA
-        score_toplot = score_spatcov
-        ax.set_title(dataset)
-        ax.set_ylabel('AUC score')
-        color = 'red'
-        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
-                        edgecolor='black', facecolor=color, alpha=0.5)
-        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed',
-                linewidth=2, label='AUC: spatcov Prec. Pattern' )        
-        
-        # logit CPPA
-        score_toplot = score_logit
-        color = 'orange'
-        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
-                        edgecolor='black', facecolor=color, alpha=0.5)
-        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed', 
-                linewidth=2, label='AUC: Prec. Pattern logit' ) 
-
-        # spatcov PEP
-        score_toplot = score_spatcov_PEP
-        color = 'blue'
-        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
-                        edgecolor='black', facecolor=color, alpha=0.5)
-        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed', 
-                linewidth=2, label='AUC: spatcov PEP' ) 
-
-        # logit PEP
-        score_toplot = score_logit_PEP
-        color = 'purple'
-        ax.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
-                        edgecolor='black', facecolor=color, alpha=0.5)
-        ax.plot(ex['lags'], score_toplot.iloc[0], color=color, linestyle='dashed', 
-                linewidth=2, label='AUC: PEP logit' ) 
+        if metric =='AUC':
+            # spatcov CPPA
+            score_toplot = score_spatcov
+            
+            color = 'red'
+            x = np.array(score_toplot.columns.levels[0])
+            ax.fill_between(x, score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+                            edgecolor='black', facecolor=color, alpha=0.5)
+            ax.plot(x, score_toplot.iloc[0], color=color, linestyle='dashed',
+                    linewidth=2, label='Prec. Pattern spatcov' )        
+            
+    
+            
+            # spatcov PEP
+            score_toplot = score_spatcov_PEP
+            color = 'blue'
+            ax.fill_between(x, score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+                            edgecolor='black', facecolor=color, alpha=0.3)
+            ax.plot(x, score_toplot.iloc[0], color=color, linestyle='solid', 
+                    linewidth=2, label='PEP spatcov' ) 
+            
+        if metric =='brier':
+            
+            score_toplot = score_logit
+            BSS = (score_toplot.loc['Brier_clim'] - score_toplot.loc['Brier']) / score_toplot.loc['Brier_clim']
+            BSS_con_low = (score_toplot.loc['Brier_clim'] - score_toplot.loc['con_low']) / score_toplot.loc['Brier_clim']
+            BSS_con_high = (score_toplot.loc['Brier_clim'] - score_toplot.loc['con_high']) / score_toplot.loc['Brier_clim']
+            # logit CPPA
+#            fig, ax = plt.subplots()
+            x = np.array(score_toplot.columns.levels[0])
+            color = 'orange'
+            ax.fill_between(x, BSS_con_low, BSS_con_high, linestyle='solid', 
+                            edgecolor='black', facecolor=color, alpha=0.5)
+            ax.plot(x, BSS, color=color, linestyle='dashed', 
+                    linewidth=2, label='Prec. Pattern logit' ) 
+    
+            # logit PEP
+            score_toplot = score_logit_PEP
+            BSS = (score_toplot.loc['Brier_clim'] - score_toplot.loc['Brier']) / score_toplot.loc['Brier_clim']
+            BSS_con_low = (score_toplot.loc['Brier_clim'] - score_toplot.loc['con_low']) / score_toplot.loc['Brier_clim']
+            BSS_con_high = (score_toplot.loc['Brier_clim'] - score_toplot.loc['con_high']) / score_toplot.loc['Brier_clim']
+            
+            color = 'purple'
+            ax.fill_between(x, BSS_con_low, BSS_con_high, linestyle='solid', 
+                            edgecolor='black', facecolor=color, alpha=0.5)
+            ax.plot(x, BSS, color=color, linestyle='solid', 
+                    linewidth=2, label='PEP logit' ) 
 
 #        # spatcov brier
 #        ax2 = ax.twinx()
 #        ax2.set_ylim(y_lim2)
 #        ax2.set_ylabel('brier score')
 #        score_toplot = brier_spatcov
-#        ax2.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+#        ax2.fill_between(lags, score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
 #                        edgecolor='black', facecolor='red', alpha=0.5)
-#        ax2.plot(ex['lags'], score_toplot.iloc[0], color='red', 
+#        ax2.plot(lags, score_toplot.iloc[0], color='red', 
 #                linewidth=2, label='brier loss score: spatcov Prec. Pattern' )       
 #        
 ##        # logit brier
 #        score_toplot = brier_logit
-#        ax2.fill_between(ex['lags'], score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
+#        ax2.fill_between(lags, score_toplot.loc['con_low'], score_toplot.loc['con_high'], linestyle='solid', 
 #                        edgecolor='black', facecolor='blue', alpha=0.5)
-#        ax2.plot(ex['lags'], score_toplot.iloc[0], color='blue', 
+#        ax2.plot(lags, score_toplot.iloc[0], color='blue', 
 #                linewidth=2, label='brier loss score: logit' )  
         
         
-    
-        ax.set_xlim(min(ex['lags'])-5,max(ex['lags'])+5)
-        ax.set_xticks(ex['lags'])  
-        ax.set_xticklabels(ex['lags'])        
+        ax.set_title(dataset, fontdict={'fontsize':18, 'weight':'bold'})
+        if metric == 'AUC': steps = 6
+        if metric == 'brier': steps = 13
+        yticks = np.round(np.linspace(y_lim[0], y_lim[1]+1E-9, steps),2)
+        ax.set_yticks(yticks)
+        ax.set_yticklabels(yticks, fontdict={'fontsize':13})
+        ax.set_xlim(min(x)-5,max(x)+5)
+        ax.set_xticks(x)  
         ax.legend(loc=2)
-        ax2.legend(loc=1)
+        ax.set_xticklabels(x, fontdict={'fontsize':13})
+        ax.set_xlabel('lead time [days]', fontdict={'fontsize':18, 'weight':'bold'})
+        ax.grid(which='major', axis='y')
+        if i == 0:
+            ax.set_ylabel(metric +' score', fontdict={'fontsize':18, 'weight':'bold'})
+                      
+#    g.fig.text(0.5, 1.1, metric, fontsize=25,
+#               fontweight='heavy', transform=g.fig.transFigure,
+#               horizontalalignment='center',verticalalignment='top')
+
     
-    lags_str = str(ex['lags']).replace(' ', '')
-    fname = 'validation_plot_{}'.format(lags_str)
-    filename = os.path.join(ex['figpathbase'], ex['CPPA_folder'], fname)
-    g.fig.savefig(fname ,dpi=250, frameon=True)
+    lags_str = str(lags).replace(' ', '')
+    fname = '{}_validation_plot_{}'.format(metric, lags_str)
+    folder  = os.path.join(ex['figpathbase'], 'validation_bram')
+    if os.path.isdir(folder) != True : os.makedirs(folder)
+    filename = os.path.join(folder, fname)
+    g.fig.savefig(filename ,dpi=250, frameon=True, bbox_inches='tight')
     #%%
     return
 
 
 
 
-def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
+def func_AUC_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
     #%%
     # =============================================================================
     # calc ROC scores
@@ -382,15 +428,33 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
             
         if np.logical_and(SCORE.all_test, ex['n'] == ex['n_conv']-1) or SCORE.fold==True:
             
-            ts_RV    = ex['test_RV'][idx]
+            ts_RV    = pd.DataFrame(test['RV'].values)
+            if lag >= 30:
+                ts_RV = ts_RV.rolling(1, center=True, min_periods=1).mean()
+#                threshold = (ts_RV.mean() + ts_RV.std()).values
+                events_idx = np.where(ts_RV > SCORE.RV_thresholds[ex['n'],idx])[0]
+            else:
+                events_idx = np.where(ts_RV > SCORE.RV_thresholds[ex['n'],idx])[0]
+            
+            y_true = func_CPPA.Ev_binary(events_idx, ts_RV.size,  ex['min_dur'], 
+                                     ex['max_break'], grouped=False)
+            y_true[y_true!=0] = 1
+#            print(y_true[y_true!=0].size)
+            
             ts_pred  = (ex['test_ts_prec'][lag_idx] - SCORE.Prec_train_mean[ex['n'],lag_idx]) / \
                         SCORE.Prec_train_std[ex['n'],lag_idx]
-            logit_pred = SCORE.logitmodel[ex['n']][lag_idx].predict(ts_pred)
+            X_pred = pd.DataFrame(ts_pred, columns=['prec_ts'])
+            X_pred = add_constant(X_pred)
+            logit_pred = SCORE.logitmodel[ex['n']][lag_idx].predict(X_pred).values
             
             events_idx = np.where(ex['test_RV'][idx] > SCORE.RV_thresholds[ex['n'],lag_idx])[0]
             y_true = func_CPPA.Ev_binary(events_idx, len(ex['test_RV'][idx]),  ex['min_dur'], 
                                      ex['max_break'], grouped=False)
             y_true[y_true!=0] = 1
+
+            events_train = SCORE.y_true_train[ex['n']][lag_idx][SCORE.y_true_train[ex['n']][lag_idx]!=0].size
+            y_true_train_clim = np.repeat( events_train/SCORE.y_true_train[ex['n']][lag_idx].size, y_true.size )
+            
             
             if SCORE.fold:
                 dates_tofill = dates_test
@@ -399,9 +463,11 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
             SCORE.Prec_test_mean[ex['n'],lag_idx]   = np.mean(ts_pred)                
             SCORE.Prec_test_std[ex['n'],lag_idx]    = np.std(ts_pred)            
             percentiles_train = SCORE.xrpercentiles[ex['n']].sel(lag=lag)
-            SCORE.RV_test.loc[dates_tofill, lag]    = pd.Series(ts_RV, 
+            SCORE.RV_test.loc[dates_tofill, lag]    = pd.Series(ts_RV.values.ravel(), 
                                                    index=dates_tofill)
             SCORE.y_true_test.loc[dates_tofill, lag]= pd.Series(y_true, 
+                                                   index=dates_tofill)
+            SCORE.y_true_train_clim.loc[dates_tofill, lag]= pd.Series(y_true_train_clim, 
                                                    index=dates_tofill)
             SCORE.Prec_test.loc[dates_tofill, lag]  = pd.Series(ts_pred, 
                                                    index=dates_tofill)
@@ -420,7 +486,7 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
                    len(ex['test_RV'][idx]), y_true[y_true!=0].sum()))
     
             
-            AUC_score, FP, TP, ROCboot, KSSboot = ROC_score(ts_pred, y_true,
+            AUC_score, FP, TP, ROCboot, KSSboot = func_AUC(ts_pred, y_true,
                                                     n_boot=SCORE.n_boot, win=0, 
                                                     n_blocks=ex['n_yrs'], 
                                                     thr_pred=percentiles_train)
@@ -454,7 +520,7 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
             
             if lag > 30:
                 obs_array = pd.DataFrame(ex['test_RV'][0])
-                obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
+                obs_array = obs_array.rolling(1, center=True, min_periods=1).mean()
                 threshold = (obs_array.mean() + obs_array.std()).values
                 events_idx = np.where(obs_array > threshold)[0]
             else:
@@ -463,7 +529,7 @@ def ROC_score_only_spatcov(test, ds_Sem, Prec_test_reg, SCORE, ex):
                                      ex['max_break'], grouped=False)
             y_true[y_true!=0] = 1
 
-            AUC_score, FP, TP, ROCboot, KSSboot = ROC_score(ts_pred, y_true,
+            AUC_score, FP, TP, ROCboot, KSSboot = func_AUC(ts_pred, y_true,
                                                     n_boot=0, win=0, 
                                                     n_blocks=ex['n_yrs'])
                                                     
@@ -522,10 +588,6 @@ def get_statistics_train(RV_ts_train, ds_Sem, Prec_train_reg, SCORE, ex):
                                                             var_patt_mcK)       
         elif ex['use_ts_logit'] == True:
             spatcov = ds_Sem['ts_prediction'][lag_idx]
-
-    
-
-        
         
         
         SCORE.Prec_train_mean[ex['n'],lag_idx] = spatcov.mean().values
@@ -545,29 +607,34 @@ def get_statistics_train(RV_ts_train, ds_Sem, Prec_train_reg, SCORE, ex):
             
         SCORE.xrpercentiles[ex['n']][lag_idx] = p_pred
         
-        obs_array = pd.DataFrame(RV_ts_train.values)
+        ts_RV = pd.DataFrame(RV_ts_train.values)
         if lag >= 30:
-            obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
+            ts_RV = ts_RV.rolling(1, center=True, min_periods=1).mean()
+        
         if ex['event_percentile'] == 'std':
             # binary time serie when T95 exceeds 1 std
-            threshold = obs_array.mean().values + obs_array.std().values
+            threshold = ts_RV.mean().values + ts_RV.std().values
         else:
             percentile = ex['event_percentile']
-            threshold = np.percentile(obs_array.values, percentile)
+            
+            threshold = np.percentile(ts_RV.values, percentile)
         SCORE.RV_thresholds[ex['n'],lag_idx] = threshold
-        events_idx = np.where(RV_ts_train.values > threshold)[0]
+        events_idx = np.where(ts_RV.values > threshold)[0]
         y_true_train = func_CPPA.Ev_binary(events_idx, len(RV_ts_train),  
                                            ex['min_dur'], ex['max_break'], grouped=False)
-        y_true_train[y_true_train!=0] = 1               
+        y_true_train[y_true_train!=0] = 1    
+
         SCORE.y_true_train[ex['n']][lag_idx][:RV_ts_train.size] = y_true_train
-        model = sm.Logit(y_true_train, spatcov_norm.values, disp=0)
+        X = pd.DataFrame(spatcov_norm.values, columns=['prec_ts'])
+        X = add_constant(X)
+        model = sm.Logit(y_true_train, X, disp=0)
         result = model.fit( disp=0 )
         SCORE.logitmodel[ex['n']][lag_idx] = result
         
 #%%
     return
 
-def ROC_score_wrapper(ex):
+def func_AUC_wrapper(ex):
     #%%
     ex['score'] = []
     FP_TP    = np.zeros(len(ex['lags']), dtype=list)
@@ -584,7 +651,7 @@ def ROC_score_wrapper(ex):
     for lag_idx, lag in enumerate(ex['lags']):
         if lag > 30:
             obs_array = pd.DataFrame(ex['test_RV'][0])
-            obs_array = obs_array.rolling(7, center=True, min_periods=1).mean()
+            obs_array = obs_array.rolling(1, center=True, min_periods=1).mean()
             threshold = (obs_array.mean() + obs_array.std()).values
             events_idx = np.where(obs_array > threshold)[0]
         else:
@@ -605,10 +672,10 @@ def ROC_score_wrapper(ex):
         
         
         if 'use_ts_logit' in ex.keys() and ex['use_ts_logit'] == True:
-            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx], KSS_boot[lag_idx] = ROC_score(
+            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx], KSS_boot[lag_idx] = func_AUC(
                             ts_pred, y_true, n_boot=n_boot, win=0, n_blocks=ex['n_yrs'])
         else:
-            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx], KSS_boot[lag_idx] = ROC_score(
+            ROC_Sem[lag_idx], FP, TP, ROC_boot[lag_idx], KSS_boot[lag_idx] = func_AUC(
                             ts_pred, y_true, n_boot=n_boot, win=0, n_blocks=ex['n_yrs'])
                                            
         
@@ -623,7 +690,7 @@ def ROC_score_wrapper(ex):
     return ex
 
 
-def ROC_score(predictions, obs_binary, n_boot=0, win=0, n_blocks=39, thr_pred='default'):
+def func_AUC(predictions, obs_binary, n_boot=0, win=0, n_blocks=39, thr_pred='default'):
     #%%
 #    win = 7
 #    predictions = pred
@@ -809,7 +876,7 @@ def ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_blocks=39, thr_pred=
         AUC_score  = np.abs(np.trapz(TP_rate, FP_rate))
         AUC_new[j] = AUC_score
         AUC_new    = np.sort(AUC_new[:])[::-1]
-#        pval       = (np.asarray(np.where(AUC_new > ROC_score)).size)/ n_boot
+#        pval       = (np.asarray(np.where(AUC_new > func_AUC)).size)/ n_boot
         ROC_bootstrap = AUC_new 
     #%%
     return ROC_bootstrap, KSS_bootstrap
@@ -820,16 +887,20 @@ def ROC_bootstrap(predictions, obs_binary, n_boot, win=0, n_blocks=39, thr_pred=
 # Plotting
 # =============================================================================
 # =============================================================================
-def plotting_timeseries(test, yrs_to_plot, ex):
-    for lag in ex['lags']:
+def plotting_timeseries(SCORE, name_pred, yrs_to_plot, ex):
+    if name_pred == 'spatcov':
+        prec_test = SCORE.Prec_test
+    elif name_pred == 'logit':
+        prec_test = SCORE.logit_test
+#    
+    for idx, lag in enumerate(ex['lags']):
         #%%
-        idx = ex['lags'].index(lag)
         # normalize
      
-        ts_pred_Sem  = ((ex['test_ts_prec'][idx]-np.mean(ex['test_ts_prec'][idx]))/ \
-                                  (np.std(ex['test_ts_prec'][idx]) ) )
-        norm_test_RV = ((ex['test_RV'][idx]-np.mean(ex['test_RV'][idx]))/ \
-                                  (np.std(ex['test_RV'][idx]) ) ) 
+        norm_test_RV = (( SCORE.RV_test[lag]-SCORE.RV_test[lag].mean() )/ \
+                                  (SCORE.RV_test[lag].std()) ) 
+        ts_pred_Sem = ((prec_test[lag]-np.mean(prec_test[lag]))/ \
+                                  (np.std(prec_test[lag]) ) ) 
         labels       = pd.to_datetime(ex['dates_RV'])
             
         
@@ -841,13 +912,13 @@ def plotting_timeseries(test, yrs_to_plot, ex):
             percentile = ex['event_percentile']
             threshold= np.percentile(norm_test_RV, percentile)
         
-        No_train_yrs = ex['n_yrs'] - int(test['RV'].size / ex['n_oneyr'])
-        title = ('Prediction time series versus truth (lag={}), '
-                 'with {} training years'.format(lag, No_train_yrs))
+#        No_train_yrs = ex['n_yrs'] - int(SCORE.RV_test[lag].size / ex['n_oneyr'])
+        title = ('Prediction time series versus truth (lag={}) '
+                 ' '.format(lag))
         years = labels.year
         years.values[-1] = ex['endyear']+1
 #                    years = np.concatenate((labels, [labels[-1]+1]))
-        df = pd.DataFrame(data={'RV':norm_test_RV, 'CPPA':ts_pred_Sem, 
+        df = pd.DataFrame(data={'RV':norm_test_RV, name_pred:ts_pred_Sem, 
                                 'date':labels, 'year':years} )
         df['RVrm'] = df['RV'].rolling(20, center=True, min_periods=5, 
               win_type=None).mean()
@@ -881,8 +952,8 @@ def plotting_timeseries(test, yrs_to_plot, ex):
 #                        ax.set_xticks(df_sub['date'][::20])
 #                        ax.set_xlim(df_sub['date'].iloc[0],df_sub['date'].iloc[-1])
             # should normalize with std from training spatial covariance or logit ts
-            ax.plot(df_sub['date'],df_sub['CPPA'], linewidth=2,
-                    label='CPPA', color='blue', alpha=0.9)
+            ax.plot(df_sub['date'],df_sub[name_pred], linewidth=2,
+                    label=name_pred, color='blue', alpha=0.9)
             ax.plot(df_sub['date'], df_sub['RV'], alpha=0.4, 
                     label='Truth', color='red', linewidth=0.5) 
             ax.plot(df_sub['date'], df_sub['RVrm'], alpha=0.9, 
@@ -897,7 +968,7 @@ def plotting_timeseries(test, yrs_to_plot, ex):
                 ax.legend(loc='lower center', prop={'size': 15})
         g.fig.text(0.5, 1.02, title, fontsize=15,
                fontweight='heavy', horizontalalignment='center')
-        filename = '{} day lead time series prediction'.format(lag)
+        filename = f'{name_pred} {lag} day lead time series prediction'
         path = os.path.join(ex['figpathbase'], ex['CPPA_folder'])
         file_name = os.path.join(path,filename+'.png')
         g.fig.savefig(file_name ,dpi=250, frameon=True)
@@ -905,17 +976,18 @@ def plotting_timeseries(test, yrs_to_plot, ex):
         #%%
 
 def get_metrics_sklearn(SCORE, y_true, prec_test, alpha=0.05, n_boot=5):
+    #%%
     df_auc = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
                           index=['AUC', 'con_low', 'con_high'])
     df_KSS = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
                           index=['KSS', 'con_low', 'con_high'])
     
-    df_brier = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
-                          index=['Brier', 'con_low', 'con_high'])
+    df_brier = pd.DataFrame(data=np.zeros( (4, len(SCORE._lags)) ), columns=[SCORE._lags],
+                          index=['Brier', 'con_low', 'con_high', 'Brier_clim'])
     
     for lag in SCORE._lags:
         metrics = metrics_sklearn(
-                    y_true[lag], prec_test[lag], 
+                    y_true[lag], prec_test[lag], SCORE.y_true_train_clim[lag],
                     alpha=alpha, n_bootstraps=n_boot)
         # AUC
         AUC_score, conf_lower, conf_upper, sorted_AUC = metrics['AUC']
@@ -924,8 +996,9 @@ def get_metrics_sklearn(SCORE, y_true, prec_test, alpha=0.05, n_boot=5):
         KSS_score, ci_low_KSS, ci_high_KSS, sorted_KSSs = metrics['KSS']
         df_KSS[lag] = (KSS_score, ci_low_KSS, ci_high_KSS)
         # Brier score
-        brier_score, ci_low_brier, ci_high_brier, sorted_briers = metrics['brier']
-        df_brier[lag] = (brier_score, ci_low_brier, ci_high_brier)
+        brier_score, brier_clim, ci_low_brier, ci_high_brier, sorted_briers = metrics['brier']
+        df_brier[lag] = (brier_score, ci_low_brier, ci_high_brier, brier_clim)
+    #%%
     return df_auc, df_KSS, df_brier, metrics
 
 
@@ -935,9 +1008,9 @@ def get_KSS_clim(y_true, y_pred, threshold_clim_events):
     KSS_score = tpr[idx_clim_events] - fpr[idx_clim_events]
     return KSS_score 
 
-def metrics_sklearn(y_true, y_pred, alpha=0.05, n_bootstraps=5):
+def metrics_sklearn(y_true, y_pred, y_true_train_clim, alpha=0.05, n_bootstraps=5):
     
-    
+    #%%
     metrics = {}
     AUC_score = roc_auc_score(y_true, y_pred)
 
@@ -952,6 +1025,8 @@ def metrics_sklearn(y_true, y_pred, alpha=0.05, n_bootstraps=5):
     else:
         y_prob = y_pred
     brier_score = brier_score_loss(y_true, y_prob)
+
+    brier_score_clim = brier_score_loss(y_true, y_true_train_clim)
     
     print("Original ROC area: {:0.3f}".format(AUC_score))
     
@@ -997,10 +1072,10 @@ def metrics_sklearn(y_true, y_pred, alpha=0.05, n_bootstraps=5):
    
     metrics['AUC'] = (AUC_score, ci_low_AUC, ci_high_AUC, sorted_AUCs)
     metrics['KSS'] = (KSS_score, ci_low_KSS, ci_high_KSS, sorted_KSSs)
-    metrics['brier'] = (brier_score, ci_low_brier, ci_high_brier, sorted_briers)
+    metrics['brier'] = (brier_score, brier_score_clim, ci_low_brier, ci_high_brier, sorted_briers)
 #    print("Confidence interval for the score: [{:0.3f} - {:0.3}]".format(
 #        confidence_lower, confidence_upper))
-    
+    #%%
     return metrics
 
 
@@ -1017,4 +1092,4 @@ def get_logit_stat(SCORE, ex):
     SCORE.df_pval = pd.DataFrame(pval, columns=[ex['lags']])
     SCORE.df_odds = pd.DataFrame(odds, columns=[ex['lags']])
     return SCORE
-            
+

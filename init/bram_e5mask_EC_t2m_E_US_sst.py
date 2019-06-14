@@ -50,12 +50,12 @@ def __init__():
          'endperiod'    :       '08-22', #'1982-08-22',
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-         'RVts_filename':       "EC_tas_2000-2159_averAggljacc1.125d_tf1_n4__to_tas_tf1_selclus2.npy", 
+         'RVts_filename':       "T95_EC_EARTH.csv", 
          'RV_name'      :       'tas',
          'name'         :       'tos',
          'add_lsm'      :       True,
          'region'       :       'Northern',
-         'lags'         :       [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75], # [0, 10, 20, 30], 
+         'lags'         :       [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75], #[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75]
          'plot_ts'      :       True,
          'exclude_yrs'  :       []
          }
@@ -83,8 +83,9 @@ def __init__():
     ex['prec_reg_max_d']        =       1
     ex['SCM_percentile_thres']  =       95
     ex['FCP_thres']             =       0.85
+    ex['min_perc_area']         =       0.02 # min size region - in % of total prec area [m2]
     ex['min_area_in_degrees2']  =       3
-    ex['distance_eps_init']     =       275 # km apart from cores sample, standard = 300
+    ex['distance_eps_init']     =       300 # km apart from cores sample, standard = 300
     ex['wghts_accross_lags']    =       False
     ex['perc_yrs_out']          =       [10, 20, 30, 40] #[7.5,10,12.5,15]  
     ex['days_before']           =       [0, 7]
@@ -92,7 +93,6 @@ def __init__():
     # =============================================================================
     # Settings for validation     
     # =============================================================================
-    ex['seed']                  =       50
     ex['leave_n_out']           =       True
     ex['ROC_leave_n_out']       =       False
     ex['method']                =       'random10fold' #'iter' or 'no_train_test_split' or split#8 or random3  

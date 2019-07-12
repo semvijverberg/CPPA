@@ -40,7 +40,7 @@ def __init__():
          'endperiod'    :       '08-22', #'1982-08-22',
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-         'RVts_filename':       "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4.npy", 
+         'RVts_filename':       "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_new.npy", 
          'RV_name'      :       't2mmax',
          'name'         :       'sst',
          'add_lsm'      :       False,
@@ -56,6 +56,7 @@ def __init__():
     ex['max_break']             =       0   
     ex['min_dur']               =       1
     ex['event_percentile']      =       'std'
+    ex['RV_aggregation']        =       'RVfullts95'
     # =============================================================================
     # Settins for precursor / CPPA
     # =============================================================================
@@ -77,7 +78,8 @@ def __init__():
     ex['wghts_accross_lags']    =       False
     ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
     ex['days_before']           =       [0, 7, 14]
-    ex['store_timeseries']      =       True
+    ex['store_timeseries']      =       False
+    ex['seed']                  =       50
     # =============================================================================
     # Settings for validation     
     # =============================================================================

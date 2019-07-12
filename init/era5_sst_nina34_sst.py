@@ -54,8 +54,6 @@ def __init__():
     # =============================================================================
     ex['tfreq']                 =       1 
     ex['max_break']             =       0 # default 0
-    ex['min_dur']               =       25 # default 1
-#    ex['event_thres']           =       -0.5
     ex['event_percentile']      =       10
     # =============================================================================
     # Settins for precursor / CPPA

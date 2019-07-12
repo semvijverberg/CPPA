@@ -66,6 +66,7 @@ def __init__():
     ex['max_break']             =       0   
     ex['min_dur']               =       1
     ex['event_percentile']      =       95
+    ex['RV_aggregation']        =       'RVfullts95'
     # =============================================================================
     # Settins for precursor / CPPA
     # =============================================================================
@@ -88,15 +89,15 @@ def __init__():
     ex['wghts_accross_lags']    =       False
     ex['perc_yrs_out']          =       [10, 20, 30, 40] #[7.5,10,12.5,15]  
     ex['days_before']           =       [0, 7]
-    ex['store_timeseries']      =       True
+    ex['store_timeseries']      =       False
     # =============================================================================
     # Settings for validation     
     # =============================================================================
-    ex['seed']                  =       50
+    ex['seed']                  =       30
     ex['leave_n_out']           =       True
     ex['ROC_leave_n_out']       =       False
     ex['method']                =       'random10fold' #'iter' or 'no_train_test_split' or split#8 or random3  
-    ex['n_boot']                =       1
+    ex['n_boot']                =       10000
     
     if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
         ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 

@@ -20,32 +20,19 @@ def load_data(ex):
   
 
     # load ERA-i Time series
+    if 'RV_aggregation' not in ex.keys():
+        ex['RV_aggregation']  = 'RVfullts95'
+    else:
+        ex['RV_aggregation'] = ex['RV_aggregation']
+    
     print('\nimportRV_1dts is true, so the 1D time serie given with name \n'
-              '{} is imported.'.format(ex['RVts_filename']))
+              '{} is imported, importing {}.'.format(ex['RVts_filename'],
+               ex['RV_aggregation']))
+    
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-    if ex['RVts_filename'][-4:] == '.npy':
-        
-        dicRV = np.load(filename,  encoding='latin1', allow_pickle=True).item()
-        try:    
-            RVtsfull = dicRV['RVfullts95']
-        except:
-            RVtsfull = dicRV['RVfullts']
-        if ex['datafolder'] == 'ERAint':
-            try:
-                ex['mask'] = dicRV['RV_array']['mask']
-            except:
-                ex['mask'] = dicRV['mask']
-        elif ex['datafolder'] == 'era5':
-            ex['mask'] = dicRV['mask']
-        if ex['datafolder'] == 'ERAint' or ex['datafolder'] == 'era5':
-            func_CPPA.xarray_plot(ex['mask'])
 
-        RVhour   = RVtsfull.time[0].dt.hour.values
-        lpyr = False
-    else:  
-        lpyr = True
-        RVtsfull = csv_to_xarray(ex, filename, delim_whitespace=False, header=None)
-        RVhour   = RVtsfull.time[0].dt.hour.values
+    RVtsfull, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
+    RVhour   = RVtsfull.time[0].dt.hour.values
 
     datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
                             ex['startyear'], ex['endyear'], lpyr=lpyr)
@@ -149,6 +136,7 @@ def load_data(ex):
 
     ex['n_yrs'] = len(set(RV_ts.time.dt.year.values))
     
+
     #%%
     return RV_ts, Prec_reg, ex
 
@@ -191,3 +179,28 @@ def csv_to_xarray(ex, path, delim_whitespace=True, header='infer'):
 
     xrdata = xr.DataArray(data=y_val, coords=[dates], dims=['time'])
     return xrdata
+
+def load_1d(filename, ex, name='RVfullts95'):
+    if ex['RVts_filename'][-4:] == '.npy':
+        
+        dicRV = np.load(filename,  encoding='latin1', allow_pickle=True).item()
+        try:    
+            RVtsfull = dicRV[name]
+        except:
+            RVtsfull = dicRV['RVfullts']
+        if ex['datafolder'] == 'ERAint':
+            try:
+                ex['mask'] = dicRV['RV_array']['mask']
+            except:
+                ex['mask'] = dicRV['mask']
+        elif ex['datafolder'] == 'era5':
+            ex['mask'] = dicRV['mask']
+        if ex['datafolder'] == 'ERAint' or ex['datafolder'] == 'era5':
+            func_CPPA.xarray_plot(ex['mask'])
+
+        
+        lpyr = False
+    else:  
+        lpyr = True
+        RVtsfull = csv_to_xarray(ex, filename, delim_whitespace=False, header=None)
+    return RVtsfull, lpyr

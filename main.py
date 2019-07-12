@@ -36,24 +36,28 @@ import func_pred
 import load_data
 import ROC_score
 from ROC_score import func_AUC_wrapper
-from ROC_score import only_spatcov_wrapper
 from ROC_score import plotting_timeseries
 
 xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
 
+# experiments
+#import init.EC_t2m_E_US_grouped_hot_days as settings
 #import init.era5_t2mmax_W_US_sst as settings
-#import init.era5_t2mmax_E_US_sst as settings
+
+import init.era5_t2mmax_E_US_sst as settings
 #import init.ERAint_t2mmax_E_US_sst as settings
 #import init.EC_t2m_E_US as settings
 
+
+
 # bram equal era 5 mask
-import init.bram_e5mask_era5_t2mmax_E_US_sst as settings
+#import init.bram_e5mask_era5_t2mmax_E_US_sst as settings
 #import init.bram_e5mask_ERAint_t2mmax_E_US_sst as settings
 #import init.bram_e5mask_EC_t2m_E_US_sst as settings
 
 ex = settings.__init__()
-
+#ex['RV_aggregation'] = 'RVfullts_mean'
 
 # =============================================================================
 # load data (write your own function load_data(ex) )
@@ -68,15 +72,16 @@ print_ex = ['RV_name', 'name', 'max_break',
             'startperiod', 'endperiod', 'leave_n_out',
             'n_oneyr', 'wghts_accross_lags', 'add_lsm',
             'tfreq', 'lags', 'n_yrs', 'region',
-            'rollingmean', 
+            'rollingmean', 'seed',
             'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
-            'prec_reg_max_d', 'distance_eps_init',
+             'distance_eps_init',
             'ROC_leave_n_out', 'method', 'n_boot',
-            'RVts_filename', 'path_pp']
+            'RVts_filename', 'path_pp', 'RV_aggregation']
 
 
 def printset(print_ex=print_ex, ex=ex):
     max_key_len = max([len(i) for i in print_ex])
+    
     for key in print_ex:
         key_len = len(key)
         expand = max_key_len - key_len
@@ -98,9 +103,8 @@ ex['n'] = n ; lag=0
 # =============================================================================
 # Run code with ex settings
 # =============================================================================
-#ex['lags'] = [0]; ex['n_boot'] = 0
+#ex['lags'] = [0]; ex['method'] = 'no_train_test_split' ; 
 l_ds_CPPA, ex = func_CPPA.main(RV_ts, Prec_reg, ex)
-   
 
 
 # save ex setting in text file
@@ -122,7 +126,7 @@ to_dict = dict( { 'ex'      :   ex,
 np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
 
 # write output in textfile
-print_ex.append('output_dic_folder')
+if 'output_dic_folder' not in print_ex: print_ex.append('output_dic_folder')
 txtfile = os.path.join(output_dic_folder, 'experiment_settings.txt')
 with open(txtfile, "w") as text_file:
     max_key_len = max([len(i) for i in print_ex])
@@ -135,58 +139,65 @@ with open(txtfile, "w") as text_file:
 
 
 
-if ex['store_timeseries'] == True:
-    subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
-    total_folder = os.path.join(ex['figpathbase'], subfolder)
-    if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-    # 'group_accros_tests_single_lag' 
-    # 'group_across_test_and_lags'
-    
-    if ex['method'] == 'iter': 
-        eps = 10
-        l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                         grouping = 'group_accros_tests_single_lag', eps=10)
-    if ex['method'][:6] == 'random':
+
+subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
+total_folder = os.path.join(ex['figpathbase'], subfolder)
+if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
+# 'group_accros_tests_single_lag' 
+# 'group_across_test_and_lags'
+
+if ex['method'] == 'iter': 
+    eps = 10
+    l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
+                     grouping = 'group_accros_tests_single_lag', eps=10)
+if ex['method'][:6] == 'random':
  
-        eps = 11 ; grouping = 'group_across_test_and_lags'
-        if ex['datafolder'] == 'EC': 
-            eps = 6 ; grouping = 'group_across_test_and_lags'
-        l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                         grouping = grouping, eps=eps)
+    eps = 11 ; grouping = 'group_across_test_and_lags'
+    if ex['datafolder'] == 'EC': 
+        eps = 6 ; grouping = 'group_across_test_and_lags'
+    l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
+                     grouping = grouping, eps=eps)
 
  
-    func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA', [0, 5], None, ex)
-    print('\n\n\nCheck labelling\n\n\n')
-    func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA_clust', [0, 5], None, ex)
-    
-    #%%
+func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA', [0, 5], None, ex)
+print('\n\n\nCheck labelling\n\n\n')
+func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA_clust', [0, 5], None, ex)
+
+if ex['store_timeseries'] == True:
     ex['eps_traintest'] = eps
     func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
     
-    
+
+    to_dict = dict( { 'ex'      :   ex,
+                     'l_ds_CPPA' : l_ds_CPPA} )
+    np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
     ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
     ex = func_AUC_wrapper(ex)
-#    args = ['python output_wrapper.py {}'.format(output_dic_folder)]
-#    func_CPPA.kornshell_with_input(args, ex)
-
 
 #%% 
-EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-05-23/lags[0,10,20,30]Ev1d0p'
-era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random4fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-05-18/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p_pmd1'
-erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random4fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-05-18/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p_pmd1'
+RVaggr = 'RVfullts95'
+EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+era5T95   = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+erai      = f'/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_{RVaggr}_rng50_2019-07-04/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 
-## same mask Bram
-EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+### same mask Bram
+#EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+
+
 
 if ex['datafolder'] == 'ERAint': output_dic_folder = erai
-if ex['datafolder'] == 'era5': output_dic_folder = era5
+if ex['datafolder'] == 'era5': output_dic_folder = era5T95
 if ex['datafolder'] == 'EC': output_dic_folder = EC_folder
+#    
+    
 # =============================================================================
 # Load and Generate output in console
 # =============================================================================
-from ROC_score import SCORE_CLASS
+#output_dic_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-05-23/lags[0,10,20,30]Ev1d0p'
+
+from scoringclass import SCORE_CLASS
 filename = 'output_main_dic'
 dic = np.load(os.path.join(output_dic_folder, filename+'.npy'),  encoding='latin1').item()
 # load settings
@@ -201,9 +212,20 @@ if 'score' in ex.keys():
 
 ex['store_timeseries'] = False
 #%%
-
-
-#ex['method']
+#ex['grouped'] = True
+#ex['lags'] = [0, 20, 40]
+#ex['store_timeseries']  = False
+#ex['event_percentile']  = 65
+#ex['min_dur']           = 4
+#ex['max_break']         = 0
+#if ex['event_percentile'] == 'std':
+#    # binary time serie when T95 exceeds 1 std
+#    ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
+#else:
+#    percentile = ex['event_percentile']
+#    ex['event_thres'] = np.percentile(RV_ts.values, percentile)
+#tim = func_CPPA.Ev_timeseries(RV_ts, ex['event_thres'], ex, grouped=ex['grouped'])[0].time
+#tim.size / RV_ts.size
 
 
 # write output in textfile
@@ -251,7 +273,7 @@ if ex['store_timeseries'] == True:
     ex = ROC_score.func_AUC_wrapper(ex)
 else:
     key_pattern_num = 'pat_num_CPPA'
-    ex, SCORE = only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+    ex, SCORE = ROC_score.only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
     ex['score'] = SCORE
     filename_2 = 'output_main_dic_with_score'
     to_dict = dict( { 'ex'      :   ex,
@@ -259,20 +281,26 @@ else:
     np.save(os.path.join(output_dic_folder, filename_2+'.npy'), to_dict) 
 if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
 
+ROC_score.create_validation_plot([output_dic_folder], metric='AUC', getPEP=False)
+ROC_score.create_validation_plot([output_dic_folder], metric='brier', getPEP=False)
 
 #%%
-EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-05-23/lags[0,10,20,30]Ev1d0p'
-era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random4fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-05-18/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p_pmd1'
-erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random4fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-05-18/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p_pmd1'
+RVaggr = 'RVfullts95'
+EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+era5T95   = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+erai      = f'/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_{RVaggr}_rng50_2019-07-04/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 
-# same mask Bram
-EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+
+
+## same mask Bram
+#EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 
 if ex['datafolder'] == 'ERAint': output_dic_folder = erai
-if ex['datafolder'] == 'era5': output_dic_folder = era5
+if ex['datafolder'] == 'era5': output_dic_folder = era5T95
 if ex['datafolder'] == 'EC': output_dic_folder = EC_folder
+
 try:
     filename_2 = 'output_main_dic_with_score'
     dic = np.load(os.path.join(output_dic_folder, filename_2+'.npy'),  encoding='latin1').item()
@@ -285,19 +313,29 @@ except:
 if 'score' in ex.keys():
     SCORE = ex['score']
 
+#%% Reliability curve
+from sklearn.calibration import calibration_curve
+lag = 50
 
-
+strategy = 'quantile' # 'quantile' or 'uniform'
+fraction_of_positives, mean_predicted_value = calibration_curve(SCORE.y_true_test[lag], SCORE.logit_test[lag], 
+                                                                n_bins=5, strategy=strategy)
+plt.plot(mean_predicted_value, fraction_of_positives) ; plt.plot(np.arange(0,1+1E-9,0.1),np.arange(0,1+1E-9,0.1))
+plt.title(f'Lead time = {lag}')
+plt.ylabel('fraction of positives')
+plt.xlabel('mean predicted value')
 #%%
-EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-05-23/lags[0,10,20,30]Ev1d0p'
-era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random4fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-05-18/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p_pmd1'
-erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random4fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-05-18/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p_pmd1'
+RVaggr = 'RVfullts95'
+EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+era5T95   = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+erai      = f'/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_{RVaggr}_rng50_2019-07-04/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 
-# same mask Bram
-EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+## same mask Bram
+#EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 
-outdic_folders = [era5, erai, EC_folder] # , erai, EC_folder
+outdic_folders = [era5T95, erai, EC_folder] # , erai, EC_folder
 
 try:  
     ROC_score.create_validation_plot(outdic_folders, metric='AUC')
@@ -314,7 +352,7 @@ except:
 lags_plot = [0, 10, 20, 35, 50, 65]
 #lags_plot = [0, 10, 20, 30]
 try:
-    ROC_str_Sem     = ['{} days - AUC score {}'.format(l, np.round(SCORE.AUC[l].mean(0), 2) ) for l in lags_plot ]
+    ROC_str_Sem     = ['{} days - AUC score {:.2f}'.format(l, np.round(float(SCORE.AUC_spatcov.loc['AUC'][l].values), 2) ) for l in lags_plot ]
 except:
     ROC_str_Sem     = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
 
@@ -398,8 +436,11 @@ if ex['leave_n_out']:
     filename = os.path.join('', 'Robustness_across_{}_training_tests_lags{}'.format(ex['n_conv'],
                             str(lags_plot).replace(' ' ,'')) )
     vmax = ex['n_conv'] 
+    extend = ['min','yellow']
+    if vmax-20 <= ex['n_conv']: extend = ['min','white']
+    
     mean = np.round(pers_patt.mean(dim=('latitude', 'longitude')).values, 1)
-#    mean = pers_patt.quantile(0.80, dim=('latitude','longitude')).values
+    
     std =  np.round(pers_patt.std(dim=('latitude', 'longitude')).values, 0)
     ax_text = ['mean = {}±{}'.format(mean[l],int(std[l])) for l in range(len(lags_plot))]
     colors = plt.cm.magma_r(np.linspace(0,0.7, 20))
@@ -408,11 +449,11 @@ if ex['leave_n_out']:
     kwrgs = dict( {'title' : pers_patt.attrs['title'], 'clevels' : 'notdefault', 
                    'steps' : 11, 'subtitles': ROC_str_Sem, 
                    'vmin' : max(0,vmax-20), 'vmax' : vmax, 'clim' : (max(0,vmax-20), vmax),
-                   'cmap' : cm, 'column' : 2, 'extend':['min','yellow'],
-                   'cbar_vert' : 0.05, 'cbar_hght' : 0.01,
+                   'cmap' : cm, 'column' : 2, 'extend':extend,
+                   'cbar_vert' : 0.07, 'cbar_hght' : 0.01,
                    'adj_fig_h' : 1.25, 'adj_fig_w' : 1., 
-                   'hspace' : 0.02, 'wspace' : 0.08
-                    } )
+                   'hspace' : -0.02, 'wspace' : 0.04, 
+                   'title_h': 0.95} )
     func_CPPA.plotting_wrapper(pers_patt, ex, filename, kwrgs=kwrgs)
 
 
@@ -423,28 +464,29 @@ if ex['leave_n_out']:
     kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
                     'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : ROC_str_Sem,
                    'cmap' : plt.cm.RdBu_r, 'column' : 1,
-                   'cbar_vert' : 0.02, 'cbar_hght' : -0.01,
+                   'cbar_vert' : 0.04, 'cbar_hght' : -0.025,
                    'adj_fig_h' : 0.9, 'adj_fig_w' : 1., 
                    'hspace' : 0.2, 'wspace' : 0.08,
                    'title_h' : 0.95} )
     # weighted by persistence (all years == wgt of 1, less is below 1)
-    mean_n_patterns = patterns_Sem.mean(dim='n_tests') * wghts/np.max(wghts)
-    mean_n_patterns = mean_n_patterns.where(wghts!=0.)
-    mean_n_patterns['lag'] = ROC_str_Sem
+    final_pattern = patterns_Sem.mean(dim='n_tests') * wghts/np.max(wghts)
+    final_pattern = mean_n_patterns.where(wghts!=0.)
+    final_pattern['lag'] = ROC_str_Sem
 
     title = 'Precursor Pattern'
-    if mean_n_patterns.sum().values != 0.:
-        mean_n_patterns.attrs['units'] = 'Kelvin'
-        mean_n_patterns.attrs['title'] = title
+    if final_pattern.sum().values != 0.:
+        final_pattern.attrs['units'] = 'Kelvin'
+        final_pattern.attrs['title'] = title
                              
-        mean_n_patterns.name = ''
+        final_pattern.name = ''
         filename = os.path.join('', ('{}_Precursor_pattern_robust_w_'
                              '{}_tests_lags{}'.format(ex['datafolder'], ex['n_conv'],
                               str(lags_plot).replace(' ' ,'')) ))
 
-        func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
+        func_CPPA.plotting_wrapper(final_pattern, ex, filename, kwrgs=kwrgs)
 
-
+#%% Cross corr matrix
+final_pattern.coords['lag'] = lags_plot
 
 
 #%% Robustness of training precursor regions
@@ -497,7 +539,8 @@ for yr in test_set_to_plot:
 filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
 dicRV = np.load(filename,  encoding='latin1').item()
 folder = os.path.join(ex['figpathbase'], ex['exp_folder'])
-xarray_plot(ex['mask'], path=folder, name='RV_mask', saving=True)
+if 'mask' in ex.keys():
+    xarray_plot(ex['mask'], path=folder, name='RV_mask', saving=True)
     
 func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=True)
 ## plotting same figure as in paper
@@ -522,6 +565,36 @@ if 'n_events' in ex.keys():
 plotting_timeseries(SCORE, 'spatcov', yrs_to_plot, ex) 
 plotting_timeseries(SCORE, 'logit', yrs_to_plot, ex) 
 
+#%%    
+from sklearn.metrics import brier_score_loss
+n_steps = 2400
+rand_scores = [] 
+for p in np.linspace(0, 1, 19):
+    n_ev = int(p * n_steps) ; 
+    rand_true = np.zeros( (n_steps) ) ; 
+    ind = np.random.choice(range(n_steps), n_ev)
+    rand_true[ind] = 1
+    rand_scores.append(brier_score_loss(rand_true, np.repeat(p, n_steps)))
+plt.plot(np.linspace(0, 1, 19), rand_scores)
+
+#%% plot frequency
+import matplotlib 
+matplotlib.rc('xtick', labelsize=15) 
+matplotlib.rc('ytick', labelsize=15) 
+datesRV = pd.to_datetime(SCORE.y_true_test[0].index)
+freq = pd.DataFrame(data= np.zeros(len(ex['all_yrs'])), index = ex['all_yrs'], columns=['freq'])
+for i, yr in enumerate(ex['all_yrs']):
+    oneyr = SCORE.y_true_test[0].loc[func_CPPA.get_oneyr(datesRV, yr)]
+    freq.loc[yr] = oneyr.sum()
+plt.figure( figsize=(8,6) )
+plt.bar(freq.index, freq['freq'])
+plt.ylabel('freq. hot days', fontdict={'fontsize':14})
+
+fname = 'freq_per_year.png'
+filename = os.path.join(output_dic_folder, fname)
+plt.savefig(filename, dpi=200) 
+
+
 #%% Initial regions from only composite extraction:
 key_pattern_num = 'pat_num_CPPA_clust'
 lags_plot = [0, 5, 10, 15, 20, 25]
@@ -537,7 +610,7 @@ if ex['leave_n_out']:
     
         
     func_CPPA.plot_precursor_regions(l_ds_CPPA, ex['n_conv'], key_pattern_num, lags, subtitles, ex)
-
+#%%
 lags_plot = [30, 35, 40, 50, 60]    
 lags = lags_plot
 if ex['leave_n_out']:
@@ -552,44 +625,170 @@ if ex['leave_n_out']:
         
     func_CPPA.plot_precursor_regions(l_ds_CPPA, ex['n_conv'], key_pattern_num, lags, subtitles, ex)
 
+#%% cross correlation plots
+df = ROC_score.get_ts_matrix(Prec_reg, final_pattern, ex, lag=0)
+ROC_score.build_matrix_wrapper(df, ex, lag=[0], wins=[1, 20, 30, 60, 80, 100, 365])
+
+
+#%% get autocorrlation plots
+import datetime    
+now = datetime.datetime.now()
+fname = now.strftime('%Y-%m-%d_%Hhr')
+from load_data import load_1d
+west_ts = "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus2.npy"
+east_ts = "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_new.npy"
+
+tsname = 'RVfullts_mean' # ['RVfullts95', 'RVfullts_mean']
 #%%
-for i, yr in enumerate(ex['all_yrs']):
-    print(yr, ex['n_events'][i])
+# import t2mmax
+filename_t2m = 't2mmax_US_1979-2018_1jan_31dec_daily_0.25deg.nc'
+prec_filename = os.path.join(ex['path_pp'], filename_t2m)
+t2m = func_CPPA.import_ds_lazy(prec_filename, ex, loadleap=True)
+filename = '/Users/semvijverberg/surfdrive/Scripts/rasterio/mask_North_America_0.25deg.nc'
+mask = func_CPPA.import_array(filename, ex)
+#%%
+if tsname == 'RVfullts95':
+    CONUS = t2m.where(mask.values==1).quantile(0.95, dim=('latitude', 'longitude'))
+elif tsname == 'RVfullts_mean':
+    CONUS = t2m.where(mask.values==1).mean(dim=('latitude', 'longitude'), skipna=True)
+#%% autocorr summers
 
-#%%    
-from sklearn.metrics import brier_score_loss
-n_steps = 2400
-rand_scores = [] 
-for p in np.linspace(0, 1, 19):
-    n_ev = int(p * n_steps) ; 
-    rand_true = np.zeros( (n_steps) ) ; 
-    ind = np.random.choice(range(n_steps), n_ev)
-    rand_true[ind] = 1
-    rand_scores.append(brier_score_loss(rand_true, np.repeat(p, n_steps)))
-plt.plot(np.linspace(0, 1, 19), rand_scores)
+def plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel):
+    ax.plot(x, ac_w[0][:x.size], color='b', label='W-U.S. cluster temperature',
+            alpha=0.5, linestyle='dashed')
+#    ax.fill_between(x, ac_w[1][:,0][:x.size], ac_w[1][:,1][:x.size], color='b',
+#                    alpha=0.2)
+    ax.plot(x, ac_e[0][:x.size], label='E-U.S. cluster temperature', color='r')
+    ax.fill_between(x, ac_e[1][:,0][:x.size], ac_e[1][:,1][:x.size], color='r',
+                    alpha=0.3)
+    ax.plot(x, ac_US[0][:x.size], label='CON-U.S. temperature', color='g',
+            alpha=0.5, linestyle='dashed')
+#    ax.fill_between(x, ac_US[1][:,0][:x.size], ac_US[1][:,1][:x.size], color='g',
+#                    alpha=0.2)
+    ax.set_ylim((-0.2,1.0))
+    ax.tick_params(labelsize=15)
+    ax.set_xticks(np.linspace(0,round(np.max(x)), 11, dtype=int))
+    ax.grid(which='both', axis='both') 
+    ax.set_xlabel(xlabel, fontsize=15)
+    ax.legend(fontsize=12)
+
+season = 'JJA'
+
+W_ts = load_1d(os.path.join(ex['RV1d_ts_path'], west_ts), ex, tsname)[0]
+E_ts = load_1d(os.path.join(ex['RV1d_ts_path'], east_ts), ex, tsname)[0]
+fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18,10))
+#ac_w = ROC_score.autocorrelation(W_ts.sel(time=W_ts['time.season'] == season))[:100]
+#ac_e = ROC_score.autocorrelation(E_ts.sel(time=E_ts['time.season'] == season))[:100]
+fig.text(0.5, 0.98, f'autocorrelation {season}', fontsize=15,
+               fontweight='heavy', transform=fig.transFigure,
+               horizontalalignment='center',verticalalignment='top')
+for i, ax in enumerate(axes):
+    if i == 0:
+        n = 92
+        ac_w = ROC_score.autocorr_sm(W_ts.sel(time=W_ts['time.season'] == season), max_lag=n)
+        ac_e = ROC_score.autocorr_sm(E_ts.sel(time=E_ts['time.season'] == season), max_lag=n)
+        ac_US = ROC_score.autocorr_sm(CONUS.sel(time=CONUS['time.season'] == season), max_lag=n)
+        x = np.arange(0, n)/92 ; xlabel = 'JJA periods [years]'
+    elif i == 1:
+        n = 20*92
+        ac_w = ROC_score.autocorr_sm(W_ts.sel(time=W_ts['time.season'] == season), max_lag=n)
+        ac_e = ROC_score.autocorr_sm(E_ts.sel(time=E_ts['time.season'] == season), max_lag=n)
+        ac_US = ROC_score.autocorr_sm(CONUS.sel(time=CONUS['time.season'] == season), max_lag=n)
+        x = np.arange(0, ac_e[0].size)/92 ;  xlabel = 'JJA periods [years]'
+    plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel=xlabel)
+plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/', 
+                         'autocorr', fname + f'_summers_{tsname}.png'))
+
+#%% autocorr fullyear
+    
+now = datetime.datetime.now()
+fname = now.strftime('%Y-%m-%d_%Hhr')
+fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
+fig.text(0.5, 0.98, f'autocorrelation', fontsize=15,
+               fontweight='heavy', transform=fig.transFigure,
+               horizontalalignment='center',verticalalignment='top')
+for i, ax in enumerate(axes):
+    if i == 0:
+        ac_w  = ROC_score.autocorr_sm(W_ts, max_lag=n)
+        ac_e  = ROC_score.autocorr_sm(E_ts, max_lag=n)
+        ac_US = ROC_score.autocorr_sm(CONUS, max_lag=n)
+        x = np.arange(0, 101) ; xlabel = 'days'
+    elif i == 1:
+        n = 20*365
+        ac_w  = ROC_score.autocorr_sm(W_ts, max_lag=n)
+        ac_e  = ROC_score.autocorr_sm(E_ts, max_lag=n)
+        ac_US = ROC_score.autocorr_sm(CONUS, max_lag=n)
+        x = np.arange(0, ac_e[0].size)/365 ;  xlabel = 'years'
+    plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel=xlabel)
+plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/', 
+                         'autocorr', fname + f'_fullyear_{tsname}.png'))
+
+
+#%% autocorr subset
+
+dates_to_sel = func_CPPA.get_oneyr(pd.to_datetime(E_ts.time.values), 1988, 2012, 2011, 1983)
+dates_to_sel = dates_to_sel[np.logical_or(dates_to_sel.month==6, dates_to_sel.month==7, dates_to_sel.month==8)]
+now = datetime.datetime.now()
+fname = now.strftime('%Y-%m-%d_%Hhr')
+fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
+fig.text(0.5, 0.98, f'autocorrelation', fontsize=15,
+               fontweight='heavy', transform=fig.transFigure,
+               horizontalalignment='center',verticalalignment='top')
+for i, ax in enumerate(axes):
+    if i == 0:
+        ac_w  = ROC_score.autocorrelation(W_ts.sel(time=dates_to_sel))[:101]
+        ac_e  = ROC_score.autocorrelation(E_ts.sel(time=dates_to_sel))[:101]
+        ac_US = ROC_score.autocorrelation(CONUS.sel(time=dates_to_sel))[:101]
+        x = range(0, 101) ; xlabel = 'days'
+    elif i == 1:
+        n = 3000
+        ac_w  = ROC_score.autocorrelation(W_ts.sel(time=dates_to_sel))[:n]
+        ac_e  = ROC_score.autocorrelation(E_ts.sel(time=dates_to_sel))[:n]
+        ac_US = ROC_score.autocorrelation(CONUS.sel(time=dates_to_sel))[:n]
+        x = np.arange(0, ac_e.size)/92 ;  xlabel = 'years'
+    plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel=xlabel)
+plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/', 
+                         'autocorr', fname + '_subsetyears.png'))
 
 #%%
-import matplotlib 
-matplotlib.rc('xtick', labelsize=15) 
-matplotlib.rc('ytick', labelsize=15) 
-datesRV = pd.to_datetime(SCORE.y_true_test[0].index)
-freq = pd.DataFrame(data= np.zeros(len(ex['all_yrs'])), index = ex['all_yrs'], columns=['freq'])
-for i, yr in enumerate(ex['all_yrs']):
-    oneyr = SCORE.y_true_test[0].loc[func_CPPA.get_oneyr(datesRV, yr)]
-    freq.loc[yr] = oneyr.sum()
-plt.figure( figsize=(8,6) )
-plt.bar(freq.index, freq['freq'])
-plt.ylabel('freq. hot days', fontdict={'fontsize':14})
 
-fname = 'freq_per_year.png'
-filename = os.path.join(output_dic_folder, fname)
-plt.savefig(filename, dpi=200)
-
-#pd.DataFrame(ex['test_ts_prec'][0]).plot.kde(bw_method=0.1)
-#pd.DataFrame(ex['test_RV'][0]).plot.kde(bw_method=0.1)
-#pd.DataFrame(ex['test_RV'][0]*ex['test_ts_prec'][0]).plot()
-#pd.DataFrame(ex['test_ts_prec'][0]).plot()
-
+#now = datetime.datetime.now()
+#from load_data import load_1d
+#east_ts = "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4.npy"
+#E_ts = load_1d(os.path.join(ex['RV1d_ts_path'], east_ts), ex)[0]
+#W_ts = Prec_reg.mean(dim=('latitude', 'longitude'), skipna=True)
+#
+#def plot_ac_w_e(ax, x, ac_w, ac_e, xlabel=None):
+#    ax.plot(x, ac_w, label='W-U.S. cluster temperature')
+##    ax.plot(x, ac_e, label='E-U.S. cluster temperature')
+#    ax.tick_params(labelsize=15)
+#    ax.set_xticks(np.linspace(0,round(np.max(x)), 11, dtype=int))
+#    ax.grid(which='both', axis='both') 
+#    if xlabel == None:
+#        ax.set_xlabel(xlabel, fontsize=15)
+#    ax.legend(fontsize=12)
+#
+#fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
+#ac_w = ROC_score.autocorrelation(W_ts)
+#ac_e = ROC_score.autocorrelation(E_ts)
+#fig.text(0.5, 0.98, f'autocorrelation', fontsize=15,
+#               fontweight='heavy', transform=fig.transFigure,
+#               horizontalalignment='center',verticalalignment='top')
+#for i, ax in enumerate(axes):
+#    if i == 0:
+#        ac_w = ROC_score.autocorrelation(W_ts)[:101]
+#        ac_e = ROC_score.autocorrelation(E_ts)[:101]
+#        x = range(0, 101) ; xlabel = 'days'
+#    elif i == 1:
+#        n = W_ts.size
+#        ac_w = ROC_score.autocorrelation(W_ts)[:n]
+#        ac_e = ROC_score.autocorrelation(E_ts)[:n]
+#        x = np.arange(0, n)/365 ;  xlabel = 'years'
+#    plot_ac_w_e(ax, x, ac_w, ac_e, xlabel=xlabel)
+    
+    
+    
+        
 
 # # End of code
 

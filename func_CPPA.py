@@ -103,8 +103,7 @@ def main(RV_ts, Prec_reg, ex):
         if len(set(flatten(ex['tested_yrs']))) != ex['n_yrs']:
             print('train test set appears to contain duplicates')
     ex['train_test_list'] = train_test_list
-    ex['output_ts_folder'] = os.path.join(ex['output_dic_folder'], 'timeseries_robwghts')
-    if os.path.isdir(ex['output_ts_folder']) != True : os.makedirs(ex['output_ts_folder'])
+
     #%%
     return l_ds_CPPA, ex
 
@@ -120,18 +119,22 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
     #%%
     now = datetime.datetime.now()
     rmwhere, window = ex['rollingmean']
+    if 'RV_aggregation' not in ex.keys():
+        ex['RV_aggregation'] = 'RVfullts95'
+    
     if ex['leave_n_out'] == True and ex['method'][:6] == 'random':
         train, test, ex = rand_traintest(RV_ts, Prec_reg, 
                                           ex)
-        
-        general_folder = '{}_leave_{}_out_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}rm{}_{}'.format(
+        if ex['n']==0:
+            general_folder = '{}_leave_{}_out_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}_rng{}_{}'.format(
                             ex['method'], ex['leave_n_years_out'], ex['startyear'], ex['endyear'],
                           ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
-                          ex['SCM_percentile_thres'], ex['FCP_thres'], window, rmwhere, 
-                          now.strftime("%Y-%m-%d"))
+                          ex['SCM_percentile_thres'], ex['FCP_thres'], ex['RV_aggregation'],
+                          ex['seed'], now.strftime("%Y-%m-%d"))
+                          
 
-    elif ex['method']=='no_train_test_split':
+    elif ex['method']=='no_train_test_split' and ex['n']==0:
         print('Training on all years')
         ex['leave_n_years_out'] = 0
         Prec_train_idx = np.arange(0, Prec_reg.time.size) #range(len(full_years)) if full_years[i] in rand_train_years]
@@ -141,35 +144,35 @@ def train_test_wrapper(RV_ts, Prec_reg, ex):
         test = dict( { 'Prec_test_idx' : Prec_train_idx,
                         'RV'    : RV_ts})
         
-    
-        general_folder = 'hindcast_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}rm{}_{}'.format(
+        if ex['n']==0:    
+            general_folder = 'hindcast_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}_{}'.format(
                           ex['startyear'], ex['endyear'],
                           ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
-                          ex['SCM_percentile_thres'], ex['FCP_thres'], window, rmwhere, 
+                          ex['SCM_percentile_thres'], ex['FCP_thres'], ex['RV_aggregation'], 
                           now.strftime("%Y-%m-%d"))
         
-    else:
+    elif ex['n']==0:
         train, test, ex = rand_traintest(RV_ts, Prec_reg, 
                                           ex)
     
-
-        general_folder = '{}_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}rm{}_{}'.format(
+        if ex['n']==0:
+            general_folder = '{}_{}_{}_tf{}_{}p_{}deg_{}nyr_{}tperc_{}tc_{}_{}'.format(
                             ex['method'], ex['startyear'], ex['endyear'],
                           ex['tfreq'], ex['event_percentile'], ex['grid_res'],
                           ex['n_oneyr'], 
-                          ex['SCM_percentile_thres'], ex['FCP_thres'], window, rmwhere, 
+                          ex['SCM_percentile_thres'], ex['FCP_thres'], ex['RV_aggregation'],
                           now.strftime("%Y-%m-%d"))
         
         
         ex['test_years'] = 'all_years'
 
-    
-    subfolder         = 'lags{}Ev{}d{}p'.format(ex['lags'], ex['min_dur'], 
-                             ex['max_break'])
-    subfolder = subfolder.replace(' ' ,'')
-    ex['CPPA_folder'] = os.path.join(general_folder, subfolder)
-    ex['output_dic_folder'] = os.path.join(ex['figpathbase'], ex['CPPA_folder'])
+    if ex['n']==0:    
+        subfolder         = 'lags{}Ev{}d{}p'.format(ex['lags'], ex['min_dur'], 
+                                 ex['max_break'])
+        subfolder = subfolder.replace(' ' ,'')
+        ex['CPPA_folder'] = os.path.join(general_folder, subfolder)
+        ex['output_dic_folder'] = os.path.join(ex['figpathbase'], ex['CPPA_folder'])
     
 
     #%%
@@ -234,6 +237,8 @@ def extract_precursor(Prec_reg, train, test, ex):
         progress = int((100*(idx+1)/len(ex['lags']) ))
         print(f"\rProgress train/test set {progress}%", end="") 
     print("\n")
+#    plt.imshow(Comp_robust[:,0].reshape(lats.size, lons.size).mask)
+#    weights.plot()
     #%%
     
     ex['input_freq'] = 'daily' ;  ex['file_type2'] = 'png'
@@ -395,7 +400,7 @@ def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag
     nparray_comp = np.reshape(np.nan_to_num(composite_p1.values), (composite_p1.size))
 #    nparray_comp = np.nan_to_num(composite_p1.values)
     Comp_robust_lag = np.ma.MaskedArray(nparray_comp, mask=mask_final)
-    
+    #%%
     return Comp_robust_lag, weights
 
 
@@ -457,7 +462,8 @@ def spatial_mean_regions(Regions_lag_i, regions_for_ts, ts_3d, npmean):
 
 def store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex):
     #%%
-    
+    ex['output_ts_folder'] = os.path.join(ex['output_dic_folder'], 'timeseries_robwghts')
+    if os.path.isdir(ex['output_ts_folder']) != True : os.makedirs(ex['output_ts_folder'])
     for n in range(len(ex['train_test_list'])):
         ex['n'] = n
         
@@ -501,7 +507,7 @@ def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
         ts_3d_nw = ts_3d_w / ds_Sem['std_train_min_lag'][idx]
         # same is done for pattern
         pattern_CPPA = ds_Sem['pattern_CPPA'].sel(lag=lag)
-        CPPA_w = pattern_CPPA * ds_Sem['weights'].sel(lag=lag)
+        CPPA_w = pattern_CPPA #* ds_Sem['weights'].sel(lag=lag)
         CPPA_nw = CPPA_w / ds_Sem['std_train_min_lag'][idx]
         
         
@@ -534,6 +540,7 @@ def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
                
         data = np.concatenate([spatcov_CPPA.values[:,None],
                                ts_regions_lag_i], axis=1)
+        data = np.array(data, dtype='float16')
         dates = pd.to_datetime(ts_3d.time.values)
         dates -= pd.Timedelta(dates.hour[0], unit='h')
         df_CPPA = pd.DataFrame(data = data, index=dates, columns=columns) 
@@ -543,7 +550,8 @@ def store_timeseries(ds_Sem, RV_ts, Prec_reg, ex):
         df.index.name = 'date'
         
         name_trainset = 'testyr{}_{}.csv'.format(ex['test_year'], lag)
-        df.to_csv(os.path.join(ex['output_ts_folder'], name_trainset ))
+        df.to_csv(os.path.join(ex['output_ts_folder'], name_trainset ), 
+                  float_format='%.5f', chunksize=int(dates.size/3))
         #%%
     return
 
@@ -588,7 +596,8 @@ def rand_traintest(RV_ts, Prec_reg, ex):
             ex['seed'] = 30 # control reproducibility train/test split
         else:
             ex['seed'] = ex['seed']
-        rng = np.random.RandomState(ex['seed'])
+        if ex['n'] == 0: ex['seed_run'] = ex['seed']
+        rng = np.random.RandomState(ex['seed_run'])
     
     
     # conditions failed initally assumed True
@@ -676,7 +685,7 @@ def rand_traintest(RV_ts, Prec_reg, ex):
         
         if diff > tolerance and ex['method'][:6] == 'random' and ex['n'] != ex['n_conv']-1: 
             print('not a representative sample drawn, drawing new sample')
-            ex['seed'] += 1 # next random sample
+            ex['seed_run'] += 1 # next random sample
             a_conditions_failed = True
         else:
             print('{}: test year is {}, with {} events'.format(ex['n'], test_years, len(event_test)))
@@ -1527,9 +1536,8 @@ def make_datestr(dates, ex, startyr, endyr, lpyr=False):
     return dates_period
 
 def import_array(filename, ex):
-
-    file_path = os.path.join(ex['path_pp'], filename) 
-    ds = xr.open_dataset(file_path, decode_cf=True, decode_coords=True, decode_times=False)
+    
+    ds = xr.open_dataset(filename, decode_cf=True, decode_coords=True, decode_times=False)
     variables = list(ds.variables.keys())
     strvars = [' {} '.format(var) for var in variables]
     common_fields = ' time time_bnds longitude latitude lev lon lat level mask '
@@ -1537,12 +1545,13 @@ def import_array(filename, ex):
     var = var.replace(' ', '')
     
     ds = ds[var].squeeze()
-    numtime = ds['time']
-    dates = num2date(numtime, units=numtime.units, calendar=numtime.attrs['calendar'])
-    dates = pd.to_datetime(dates)
-    dates -= pd.Timedelta(dates.hour[0], unit='h')
-    
-    ds['time'] = dates
+    if 'time' in ds.dims:
+        numtime = ds['time']
+        dates = num2date(numtime, units=numtime.units, calendar=numtime.attrs['calendar'])
+        dates = pd.to_datetime(dates)
+        dates -= pd.Timedelta(dates.hour[0], unit='h')
+        
+        ds['time'] = dates
     return ds
 
 def import_ds_lazy(filename, ex, loadleap=False, seldates=None):
@@ -1628,11 +1637,15 @@ def convert_longitude(data, to_format='west_east'):
         # adapt longitude values above 180 to negative values
         substract = lambda x, y: (x - y)
         lon_above = xr.apply_ufunc(substract, lon_above, 360)
-        if lon_normal[0] == 0.:
-            convert_lon = xr.concat([lon_above, lon_normal], dim='longitude')
+        if lon_normal.size != 0:
+            if lon_normal[0] == 0.:
+                convert_lon = xr.concat([lon_above, lon_normal], dim='longitude')
+            
+            else:
+                convert_lon = xr.concat([lon_normal, lon_above], dim='longitude')
         else:
-            convert_lon = xr.concat([lon_normal, lon_above], dim='longitude')
-        
+            convert_lon = lon_above
+
     elif to_format == 'only_east':
         lon_above = data.longitude[np.where(data.longitude >= 0)[0]]
         lon_below = data.longitude[np.where(data.longitude < 0)[0]]
@@ -1650,10 +1663,10 @@ def rolling_mean_xr(xarray, win):
     ext_array = np.insert(ext_array, 0, flatarray[:closed])
     
     df = pd.DataFrame(ext_array)
-    std = xarray.where(xarray.values!=0.).std().values
+#    std = xarray.where(xarray.values!=0.).std().values
 #    scipy.signal.gaussian(win, std)
     rollmean = df.rolling(win, center=True, 
-                          win_type='gaussian').mean(std=std).dropna()
+                          win_type='gaussian').mean(std=win/2.).dropna()
     
     # replace values with smoothened values
     new_xarray = xarray.copy()
@@ -1752,6 +1765,8 @@ def find_region(data, region='Pacific_US'):
         west_lon = -170; east_lon = -120; south_lat = -5; north_lat = 5 
     elif region ==  'PEPrectangle':
         west_lon = -215; east_lon = -130; south_lat = 20; north_lat = 50
+    elif region ==  'PDO':
+        west_lon = -250; east_lon = -110; south_lat = 20; north_lat = 70
 #    elif region == 'for_soil':
         
 
@@ -2055,8 +2070,9 @@ def plot_precursor_regions(l_ds, n_tests, key_pattern_num, lags, subtitles, ex):
         counting[key] = r
     ex['max_N_regs'] = 1
     for k in counting.keys():
-        if k > 0.5 * ex['n_conv'] * len(lags):
-            ex['max_N_regs'] = int(counting[k]) + 1    
+        if k < 0.5 * ex['n_conv'] * len(lags):
+            ex['max_N_regs'] = int(counting[k]) + 1   
+            break
     
     for n in np.linspace(0, ex['n_conv']-1, n_tests, dtype=int): 
         years = ex['tested_yrs']
@@ -2154,52 +2170,128 @@ def plot_earth(view="EARTH", kwrgs={'cen_lon':0}):
     return projection, ax
 
 def xarray_plot(data, path='default', name = 'default', saving=False):
+    #%%
     # from plotting import save_figure
     import matplotlib.pyplot as plt
     import cartopy.crs as ccrs
     import numpy as np
     if type(data) == type(xr.Dataset()):
         data = data.to_array().squeeze()
-#    original
-    fig = plt.figure( figsize=(10,6) ) 
+
+    # some lon values > 180
     if len(data.longitude[np.where(data.longitude > 180)[0]]) != 0:
-        if data.longitude.where(data.longitude==0).dropna(dim='longitude', how='all') == 0.:
+        # if 0 is in lon values
+        if data.longitude.where(data.longitude==0).dropna(dim='longitude', how='all').size != 0.:
             print('hoi')   
             data = convert_longitude(data)
     else:
         pass
+    
+    # get lonlat labels
+    def evenly_spaced(ticks, steps=[5, 6, 7, 4, 3, 4]):
+        def myround(x, base=5):
+            return np.array(base * np.round(x/base,0), dtype=int)
+        size = []
+        tmp  = []
+        for s in steps:
+            labels = np.linspace(np.min(ticks), np.max(ticks), s, dtype=int)
+            labels = np.array(sorted(list(set(myround(labels, 5)))))
+            tmp.append([labels[l]-labels[l+1] for l in range(s-1)])
+            size.append(np.unique([labels[l]-labels[l+1] for l in range(s-1)]).size)
+            if size[-1]==1:
+                break
+        return labels
+
+    longitude_labels = evenly_spaced(data.longitude.values)
+    latitude_labels = evenly_spaced(data.latitude.values, steps=[4,3,5])
+    
+    
     if data.ndim != 2:
         print("number of dimension is {}, printing first element of first dimension".format(np.squeeze(data).ndim))
         data = data[0]
     else:
         pass
     if 'mask' in list(data.coords.keys()):
-        cen_lon = data.where(data.mask==True, drop=True).longitude.mean()
+        lons = data.where(data.mask==True, drop=True).longitude
+        lats = data.where(data.mask==True, drop=True).latitude
+        cen_lon = int(lons.mean())
         data = data.where(data.mask==True, drop=True)
     else:
-        cen_lon = data.longitude.mean().values
+        lons = data.where(data.mask==True, drop=True).longitude
+        lats = data.where(data.mask==True, drop=True).latitude
+        cen_lon = (lons.mean())
+#    data = data.sortby(lons)
+    
+    
+    fig = plt.figure( figsize=(15,11) ) 
     proj = ccrs.PlateCarree(central_longitude=cen_lon)
     ax = fig.add_subplot(111, projection=proj)
-    ax.coastlines(facecolor='grey')
+    ax.coastlines(color='black', alpha=0.3, facecolor='grey')
+    ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
+#    ax.tick_params(axis='both', labelsize='small')
+#    ax.set_xlabel([str(el) for el in longitude_labels])
+    if proj.proj4_params['proj'] in ['merc', 'eqc']:
+        
+        ax.set_xticks(longitude_labels[:], crs=ccrs.PlateCarree())
+        ax.set_xticklabels(longitude_labels[:], fontsize=12)
+        lon_formatter = cticker.LongitudeFormatter()
+        ax.xaxis.set_major_formatter(lon_formatter)
+        
+        ax.set_yticks(latitude_labels, crs=ccrs.PlateCarree())
+        ax.set_yticklabels(latitude_labels, fontsize=12)
+        lat_formatter = cticker.LatitudeFormatter()
+        ax.yaxis.set_major_formatter(lat_formatter)
+        ax.grid(linewidth=1, color='black', alpha=0.3, linestyle='--')
+    
     vmin = np.round(float(data.min())-0.01,decimals=2) 
     vmax = np.round(float(data.max())+0.01,decimals=2) 
     vmin = -max(abs(vmin),vmax) ; vmax = max(abs(vmin),vmax)
-    # ax.set_global()
+    ax.set_extent([lons[0],lons[-1], lats[0], lats[-1]], ccrs.PlateCarree())
+
+    data.attrs['long_name'] = ''
     if 'mask' in list(data.coords.keys()):
-        plot = data.copy().where(data.mask==True).plot.pcolormesh(ax=ax, cmap=plt.cm.RdBu_r,
+        for_plt = data.copy().where(data.mask==True)
+        plot = for_plt.plot.pcolormesh('longitude', 'latitude', ax=ax, cmap=plt.cm.RdBu_r,
                              transform=ccrs.PlateCarree(), add_colorbar=True,
-                             vmin=vmin, vmax=vmax,
-                             cbar_kwargs={'orientation' : 'horizontal'})
+                             vmin=vmin, vmax=vmax, subplot_kws={'projection': proj},
+                             cbar_kwargs={'orientation' : 'horizontal', 
+                                          'fraction':0.10,
+                                          'pad':0.05})
     else:
         plot = data.plot.pcolormesh(ax=ax, cmap=plt.cm.RdBu_r,
                              transform=ccrs.PlateCarree(), add_colorbar=True,
                              vmin=vmin, vmax=vmax, 
                              cbar_kwargs={'orientation' : 'horizontal'})
+    plot.colorbar.ax.set_label('')
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    
+    #%%
     if saving == True:
-        save_figure(data, path=path)
+        save_figure(fig, path=path, name=name)
     plt.show()
-    
-    
+
+def save_figure(fig, path, name=''):
+    import datetime
+    now = datetime.datetime.now().strftime('%y-%m-%d_%H:%M')
+    if path == 'default':
+        path = '/Users/semvijverberg/Downloads'
+    else:
+        path = path
+    import datetime
+    today = datetime.datetime.today().strftime("%d-%m-%y_%H'%M")
+    if name == '':
+        name = now
+    if name != '':
+        print('input name is: {}'.format(name))
+        name = name + '.png'
+        pass
+    else:
+        name = 'fig_' + today + '.png'
+    print(('{} to path {}'.format(name, path)))
+    fig.savefig(os.path.join(path,name), format='png', dpi=300, bbox_inches='tight')
+    return fig
+
 def plot_events_validation(pred1, pred2, obs, pt1, pt2, othreshold, test_year=None):
     #%%
 #    pred1 = crosscorr_Sem
@@ -2524,7 +2616,10 @@ def finalfigure(xrdata, file_name, kwrgs):
     if 'hspace' in kwrgs.keys():
         g.fig.subplots_adjust(hspace=kwrgs['hspace'])
     if 'extend' in kwrgs.keys():
-        extend = kwrgs['extend'][0]
+        if kwrgs['extend'] != None:
+            extend = kwrgs['extend'][0]
+        else:
+            extend = 'neither'
     else:
         extend = 'neither'
 
@@ -2548,7 +2643,10 @@ def finalfigure(xrdata, file_name, kwrgs):
     
     if 'extend' in kwrgs.keys():
         if kwrgs['extend'][0] == 'min':
-            cbar.cmap_.set_under(cbar.to_rgba(kwrgs['vmin']))
+            if type(kwrgs['extend'][1]) == type(str()):
+                cbar.cmap.set_under(kwrgs['extend'][1])
+            else:
+                cbar.cmap.set_under(cbar.to_rgba(kwrgs['extend'][1]))
     cbar.set_label(xrdata.attrs['units'], fontsize=16)
     cbar.ax.tick_params(labelsize=14)
     #%%
@@ -2796,7 +2894,38 @@ def figure_for_schematic(iter_regions, composite_p1, chunks, lats, lons, ex):
     #%%
     return
 
-#
+def get_PDO(sst):
+    #%%
+    from eofs.xarray import Eof
+    PDO   = find_region(sst, region='PDO')[0]
+    solver = Eof(area_weighted(PDO))
+    # Retrieve the leading EOF, expressed as the correlation between the leading
+    # PC time series and the input SST anomalies at each grid point, and the
+    # leading PC time series itself.
+    eof1 = solver.eofsAsCorrelation(neofs=1).squeeze()
+    init_sign = np.sign(np.mean(eof1)) # flip sign oef pattern and ts
+    eof1 *= init_sign
+    pc1 = solver.pcs(npcs=1, pcscaling=1).squeeze()
+    pc1 *= init_sign
+    return eof1, pc1
+
+def corr_matrix_pval(df, alpha=0.05):
+    from scipy import stats
+    if type(df) == type(pd.DataFrame()):
+        cross_corr = np.zeros( (df.columns.size, df.columns.size) )
+        pval_matrix = np.zeros_like(cross_corr)
+        for i1, col1 in enumerate(df.columns):
+            for i2, col2 in enumerate(df.columns):
+                pval = stats.pearsonr(df[col1].values, df[col2].values)
+                pval_matrix[i1, i2] = pval[-1]
+                cross_corr[i1, i2]  = pval[0]
+        # recreate pandas cross corr
+        cross_corr = pd.DataFrame(data=cross_corr, columns=df.columns, 
+                                  index=df.columns)
+                
+    sig_mask = pval_matrix < alpha
+    return cross_corr, sig_mask, pval_matrix
+    #%%
 #    # figure robustness 2
 #    #%%
 #    weights = np.sum(reg_all_1, axis=0)

@@ -41,7 +41,7 @@ def __init__():
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
          'RVts_filename':       "ERAint_t2mmax_US_1979-2017_averAggljacc0.75d_tf1_n4__to_t2mmax_US_tf1.npy", 
-         'RV_name'      :       't2mmax',
+         'RV_name'      :       'T2mmax',
          'name'         :       'sst',
          'add_lsm'      :       False,
          'region'       :       'Northern',
@@ -56,6 +56,7 @@ def __init__():
     ex['max_break']             =       0   
     ex['min_dur']               =       1
     ex['event_percentile']      =       'std'
+    ex['RV_aggregation']        =       'RVfullts95'
     # =============================================================================
     # Settins for precursor / CPPA
     # =============================================================================
@@ -84,7 +85,8 @@ def __init__():
     ex['leave_n_out']           =       True
     ex['ROC_leave_n_out']       =       False
     ex['method']                =       'random10fold' #'iter' or 'no_train_test_split' or split#8 or random3  
-    ex['n_boot']                =       1
+    ex['n_boot']                =       10000
+    ex['seed']                  =       50
     
     if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
         ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 

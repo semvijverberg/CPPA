@@ -46,6 +46,7 @@ def __init__():
          'endyear'      :       2159,
          'path_pp'      :       path_pp,
          'path_raw'     :       path_raw,
+         'input_freq'   :       'daily',
          'startperiod'  :       '06-24', #'1982-06-24',
          'endperiod'    :       '08-22', #'1982-08-22',
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),

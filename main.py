@@ -35,7 +35,6 @@ import func_CPPA
 import func_pred
 import load_data
 import ROC_score
-from ROC_score import func_AUC_wrapper
 from ROC_score import plotting_timeseries
 
 xarray_plot = func_CPPA.xarray_plot
@@ -45,9 +44,9 @@ xrplot = func_CPPA.xarray_plot
 #import init.EC_t2m_E_US_grouped_hot_days as settings
 #import init.era5_t2mmax_W_US_sst as settings
 
-import init.era5_t2mmax_E_US_sst as settings
+#import init.era5_t2mmax_E_US_sst as settings
 #import init.ERAint_t2mmax_E_US_sst as settings
-#import init.EC_t2m_E_US as settings
+import init.EC_t2m_E_US as settings
 
 
 
@@ -62,8 +61,8 @@ ex = settings.__init__()
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
-RV_ts, Prec_reg, ex = load_data.load_data(ex)
-
+RVtsfull, RV_ts, ex = load_data.load_response_variable(ex)
+Prec_reg, ex = load_data.load_precursor(ex)
 
 print_ex = ['RV_name', 'name', 'max_break',
             'min_dur', 'event_percentile',
@@ -172,7 +171,7 @@ if ex['store_timeseries'] == True:
                      'l_ds_CPPA' : l_ds_CPPA} )
     np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
     ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
-    ex = func_AUC_wrapper(ex)
+
 
 #%% 
 RVaggr = 'RVfullts95'
@@ -284,6 +283,50 @@ if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
 ROC_score.create_validation_plot([output_dic_folder], metric='AUC', getPEP=False)
 ROC_score.create_validation_plot([output_dic_folder], metric='brier', getPEP=False)
 
+#%% New scoring func
+path_ts = ex['output_ts_folder']
+lag_to_load = 5
+lags_to_test = [0, 1, 2]
+frequencies = [1, 5, 10, 15, 20, 25, 29, 30, 31, 33, 35, 37, 39, 40, 41, 42, 44, 45]
+#frequencies = [60, 80]
+t = 30
+BSS_f = [] 
+AUC_f = []
+for t in frequencies:
+    print('tfreq:', t)
+    ex['tfreq'] = t
+    ex['lags'] = [l*t for l in lags_to_test]
+    SCORE, ex = ROC_score.spatial_cov(RV_ts, ex, path_ts, lag_to_load=lag_to_load, keys=['spatcov_CPPA'])
+    BSS = SCORE.brier_logit.loc['BSS'].values
+    AUC = SCORE.AUC_spatcov.loc['AUC'].values
+    BSS_f.append(BSS)
+    AUC_f.append(AUC)
+    print(BSS)
+
+#%%
+import seaborn as sns
+
+def plot_score_freq(x, y, metric, lags_to_test):
+    df = pd.DataFrame(np.swapaxes(BSS_f, 1,0), 
+                      index=None, columns = frequencies)
+    df['lag'] = pd.Series(lags_to_test, index=df.index)
+    
+    g = sns.FacetGrid(df, col='lag', size=3, aspect=1.4,sharey=True, col_wrap=3)
+    for i, ax in enumerate(g.axes.flatten()):
+        l = df['lag'][i]
+        ax.scatter(x, np.array(y)[:,l].squeeze())
+        ax.set_ylabel(metric) ; ax.set_xlabel('Time Aggregation')
+        ax.grid(b=True, which='major')
+        ax.set_title('lag {}'.format(i))
+        xticks = np.arange(0, max(frequencies), 5) ; xticks[0] = 1
+        ax.set_xticks(xticks)
+    str_freq = str(x).replace(' ' ,'')  
+    lags_str = str(lags_to_test).replace(' ' ,'')        
+    f_name = '{}_lags_tfreqs_{}.png'.format(metric, str_freq, lags_str)
+    filename = os.path.join(output_dic_folder, f_name)
+    plt.savefig(filename, dpi=600)
+plot_score_freq(frequencies, BSS_f, 'BSS', lags_to_test)
+plot_score_freq(frequencies, AUC_f, 'AUC', lags_to_test)
 #%%
 RVaggr = 'RVfullts95'
 EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
@@ -315,10 +358,10 @@ if 'score' in ex.keys():
 
 #%% Reliability curve
 from sklearn.calibration import calibration_curve
-lag = 50
+lag = 90
 
 strategy = 'quantile' # 'quantile' or 'uniform'
-fraction_of_positives, mean_predicted_value = calibration_curve(SCORE.y_true_test[lag], SCORE.logit_test[lag], 
+fraction_of_positives, mean_predicted_value = calibration_curve(SCORE.y_true_test[0], SCORE.predmodel_2[lag], 
                                                                 n_bins=5, strategy=strategy)
 plt.plot(mean_predicted_value, fraction_of_positives) ; plt.plot(np.arange(0,1+1E-9,0.1),np.arange(0,1+1E-9,0.1))
 plt.title(f'Lead time = {lag}')
@@ -592,7 +635,7 @@ plt.ylabel('freq. hot days', fontdict={'fontsize':14})
 
 fname = 'freq_per_year.png'
 filename = os.path.join(output_dic_folder, fname)
-plt.savefig(filename, dpi=200) 
+plt.savefig(filename, dpi=600) 
 
 
 #%% Initial regions from only composite extraction:
@@ -697,7 +740,7 @@ for i, ax in enumerate(axes):
         x = np.arange(0, ac_e[0].size)/92 ;  xlabel = 'JJA periods [years]'
     plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel=xlabel)
 plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/', 
-                         'autocorr', fname + f'_summers_{tsname}.png'))
+                         'autocorr', fname + f'_summers_{tsname}.png'), dpi=600)
 
 #%% autocorr fullyear
     
@@ -721,7 +764,7 @@ for i, ax in enumerate(axes):
         x = np.arange(0, ac_e[0].size)/365 ;  xlabel = 'years'
     plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel=xlabel)
 plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/', 
-                         'autocorr', fname + f'_fullyear_{tsname}.png'))
+                         'autocorr', fname + f'_fullyear_{tsname}.png'), dpi=600)
 
 
 #%% autocorr subset
@@ -748,7 +791,7 @@ for i, ax in enumerate(axes):
         x = np.arange(0, ac_e.size)/92 ;  xlabel = 'years'
     plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel=xlabel)
 plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/', 
-                         'autocorr', fname + '_subsetyears.png'))
+                         'autocorr', fname + '_subsetyears.png'), dpi=600)
 
 #%%
 

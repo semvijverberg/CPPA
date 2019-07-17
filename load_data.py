@@ -14,7 +14,7 @@ from dateutil.relativedelta import relativedelta as date_dt
 flatten = lambda l: [item for sublist in l for item in sublist]
 
 
-def load_data(ex):
+def load_response_variable(ex):
     #%%
     #'Mckinnonplot', 'U.S.', 'U.S.cluster', 'PEPrectangle', 'Pacific', 'Whole', 'Northern', 'Southern'  
   
@@ -32,27 +32,86 @@ def load_data(ex):
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
 
     RVtsfull, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
+    if ex['tfreq'] != 1:
+        RVtsfull, dates = func_CPPA.time_mean_bins(RVtsfull, ex)
+    
     RVhour   = RVtsfull.time[0].dt.hour.values
-
-    datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
+    dates_all = pd.to_datetime(RVtsfull.time.values)
+    
+    datesRV = func_CPPA.make_datestr(dates_all, ex, 
                             ex['startyear'], ex['endyear'], lpyr=lpyr)
-    # =============================================================================
+ 
+
+    if ex['rollingmean'][0] == 'RV' and ex['rollingmean'][1] != 1:
+        RVtsfull = func_CPPA.rolling_mean_time(RVtsfull, ex, center=True)
+    
+    if 'exclude_yrs' in ex.keys():
+        print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
+        
+        all_yrs = np.unique(dates_all.year)
+        yrs_keep = [y for y in all_yrs if y not in ex['exclude_yrs']]
+        idx_yrs =  [i for i in np.arange(dates_all.year.size) if dates_all.year[i] in yrs_keep]
+#        dates_all = dates_all[idx_yrs]
+        mask_all    = np.zeros(dates_all.size, dtype=bool)
+        mask_all[idx_yrs] = True
+        
+        idx_yrs =  [i for i in np.arange(datesRV.year.size) if datesRV.year[i] in yrs_keep]
+        mask_RV    = np.zeros(datesRV.size, dtype=bool)
+        mask_RV[idx_yrs] = True
+        
+        
+        dates_all = dates_all[mask_all]
+        datesRV = datesRV[mask_RV]
+    
+    ex['dates_all']  = pd.to_datetime(np.array(dates_all, dtype='datetime64[D]'))
+    ex['dates_RV'] = pd.to_datetime(np.array(datesRV, dtype='datetime64[D]'))
+    # add RVhour to daily dates
+    datesRV = datesRV + pd.Timedelta(int(RVhour), unit='h')
+    ex['endyear'] = int(datesRV[-1].year)
+    
+    # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
+    RV_ts = RVtsfull.sel(time=ex['dates_RV'])
+    ex['n_oneyr'] = func_CPPA.get_oneyr(datesRV).size
+    
+
+    #expanded_time = func_mcK.expand_times_for_lags(dates, ex)
+    
+    if ex['RVts_filename'][:8] == 'nino3.4_' and 'event_thres' in ex.keys():
+        ex['event_thres'] = ex['event_thres']
+    else:
+        if ex['event_percentile'] == 'std':
+            # binary time serie when T95 exceeds 1 std
+            ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
+        else:
+            percentile = ex['event_percentile']
+            ex['event_thres'] = np.percentile(RV_ts.values, percentile)
+
+    ex['n_yrs'] = int(len(set(RV_ts.time.dt.year.values)))
+    ex['endyear'] = int(datesRV[-1].year)
+
+    #%%
+    return RVtsfull, RV_ts, ex
+
+def load_precursor(ex):
+    #%%
+    dates_all = ex['dates_all']
+   # =============================================================================
     # Load Precursor     
     # =============================================================================
     prec_filename = os.path.join(ex['path_pp'], ex['filename_precur'])
-    if ex['datafolder'] == 'EC':
-        try:
-            datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
-                            ex['startyear'], ex['endyear'], lpyr=False)
-            dates_prec = subset_dates(datesRV, ex)
-            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
-        except:
-            datesRV = func_CPPA.make_datestr(pd.to_datetime(RVtsfull.time.values), ex, 
-                                    ex['startyear'], ex['endyear'], lpyr=True)
-            dates_prec = subset_dates(datesRV, ex)
-            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
-    else:
-        varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, loadleap=True)
+#    if ex['datafolder'] == 'EC':
+#        try:
+#            datesRV = func_CPPA.make_datestr(dates_all, ex, 
+#                            ex['startyear'], ex['endyear'], lpyr=False)
+#            dates_prec = subset_dates(datesRV, ex)
+#            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
+#        except:
+#            datesRV = func_CPPA.make_datestr(dates_all, ex, 
+#                                    ex['startyear'], ex['endyear'], lpyr=True)
+#            dates_prec = subset_dates(datesRV, ex)
+#            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
+#    else:
+    varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, loadleap=True)
     
     # =============================================================================
     # Ensure same longitude  
@@ -64,6 +123,7 @@ def load_data(ex):
     # Select a focus region  
     # =============================================================================
     Prec_reg = func_CPPA.find_region(varfullgl, region=ex['region'])[0]
+    Prec_reg = Prec_reg.sel(time=dates_all)
     
     if ex['tfreq'] != 1:
         Prec_reg, datesvar = func_CPPA.time_mean_bins(Prec_reg, ex)
@@ -91,54 +151,25 @@ def load_data(ex):
         mask = (('latitude', 'longitude'), mask_reg)
         Prec_reg.coords['mask'] = mask
         Prec_reg = Prec_reg.where(mask_reg==True)
-#        xarray_plot(Prec_reg[0])
     
-    if ex['rollingmean'][0] == 'RV' and ex['rollingmean'][1] != 1:
-        RVtsfull = func_CPPA.rolling_mean_time(RVtsfull, ex, center=True)
+    
     
     if 'exclude_yrs' in ex.keys():
-        print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
-        dates_prec = pd.to_datetime(Prec_reg.time.values)
-        all_yrs = np.unique(dates_prec.year)
-        yrs_keep = [y for y in all_yrs if y not in ex['exclude_yrs']]
-        idx_yrs =  [i for i in np.arange(dates_prec.year.size) if dates_prec.year[i] in yrs_keep]
-        mask    = np.zeros(dates_prec.size, dtype=bool)
-        mask[idx_yrs] = True
-        dates_excl_yrs = dates_prec[mask]
-        Prec_reg = Prec_reg.sel(time= dates_excl_yrs)
-        idx_yrs =  [i for i in np.arange(datesRV.year.size) if datesRV.year[i] in yrs_keep]
-        mask    = np.zeros(datesRV.size, dtype=bool)
-        mask[idx_yrs] = True
-        datesRV = datesRV[mask]
-        
-    ex['dates_RV'] = datesRV
-    # add RVhour to daily dates
-    datesRV = datesRV + pd.Timedelta(int(RVhour), unit='h')
-    ex['endyear'] = int(datesRV[-1].year)
-    
-    # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
-    RV_ts = RVtsfull.sel(time=datesRV)
-    ex['n_oneyr'] = func_CPPA.get_oneyr(datesRV).size
-    
-    if ex['tfreq'] != 1:
-        RV_ts, dates = func_CPPA.time_mean_bins(RV_ts, ex)
-    #expanded_time = func_mcK.expand_times_for_lags(dates, ex)
-    
-    if ex['RVts_filename'][:8] == 'nino3.4_' and 'event_thres' in ex.keys():
-        ex['event_thres'] = ex['event_thres']
-    else:
-        if ex['event_percentile'] == 'std':
-            # binary time serie when T95 exceeds 1 std
-            ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
-        else:
-            percentile = ex['event_percentile']
-            ex['event_thres'] = np.percentile(RV_ts.values, percentile)
-
-    ex['n_yrs'] = len(set(RV_ts.time.dt.year.values))
-    
+        if len(ex['exclude_yrs']) != 0:
+            print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
+            
+            all_yrs = np.unique(dates_all.year)
+            yrs_keep = [y for y in all_yrs if y not in ex['exclude_yrs']]
+            idx_yrs =  [i for i in np.arange(dates_all.year.size) if dates_all.year[i] in yrs_keep]
+    #        dates_all = dates_all[idx_yrs]
+            mask_all    = np.zeros(dates_all.size, dtype=bool)
+            mask_all[idx_yrs] = True
+            dates_excl_yrs = dates_all[mask_all]
+            Prec_reg = Prec_reg.sel(time= dates_excl_yrs)
+       
 
     #%%
-    return RV_ts, Prec_reg, ex
+    return Prec_reg, ex
 
     
 def subset_dates(datesRV, ex):

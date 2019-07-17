@@ -414,15 +414,21 @@ def get_scores_per_fold(SCORE):
                   '{}\nDatapoints RV length {}, with {:.0f} events'.format(ts_pred_c.size,
                    len(y_true_c), y_true_c[y_true_c!=0].sum()))
             
+            if np.unique(y_true_c).size != 2:
+                print('Fold with no events')
+                AUC_score, FP, TP, ROCboot, KSSboot = [np.nan] * 5
+                break
+            
             percentiles_train = SCORE.xrpercentiles[f].sel(lag=lag)
             AUC_score, FP, TP, ROCboot, KSSboot = func_AUC(ts_pred_c, y_true_c,
-                                                    n_boot=0, win=0, 
-                                                    n_blocks=int(y_true_c.size / SCORE.bootstrap_size), 
-                                                    thr_pred=percentiles_train)
+                                            n_boot=0, win=0, 
+                                            n_blocks=
+                                            int(y_true_c.size / SCORE.bootstrap_size), 
+                                            thr_pred=percentiles_train)
             SCORE.AUC.iloc[f][lag]        = AUC_score
             
             # Scores of probabilistic logit (model) 
-            metrics = metrics_sklearn(y_true_c, ts_logit_c, y_true_train_clim_c, n_boot=1, blocksize=SCORE.bootstrap_size)
+            metrics = metrics_sklearn(y_true_c, ts_logit_c, y_true_train_clim_c, n_boot=100, blocksize=SCORE.bootstrap_size)
     
             brier_score, brier_clim, ci_low_brier, ci_high_brier, sorted_briers = metrics['brier'] 
             FP, TP, thresholds = metrics['fpr_tpr_thres']
@@ -820,8 +826,8 @@ def get_metrics_sklearn(SCORE, y_pred_all, alpha=0.05, n_boot=5):
     df_KSS = pd.DataFrame(data=np.zeros( (3, len(SCORE._lags)) ), columns=[SCORE._lags],
                           index=['KSS', 'con_low', 'con_high'])
     
-    df_brier = pd.DataFrame(data=np.zeros( (4, len(SCORE._lags)) ), columns=[SCORE._lags],
-                          index=['Brier', 'con_low', 'con_high', 'Brier_clim'])
+    df_brier = pd.DataFrame(data=np.zeros( (7, len(SCORE._lags)) ), columns=[SCORE._lags],
+                          index=['BSS', 'BSS_low', 'BSS_high', 'Brier', 'con_low', 'con_high', 'Brier_clim'])
     
     
     for lag in SCORE._lags:
@@ -838,7 +844,11 @@ def get_metrics_sklearn(SCORE, y_pred_all, alpha=0.05, n_boot=5):
         df_KSS[lag] = (KSS_score, ci_low_KSS, ci_high_KSS)
         # Brier score
         brier_score, brier_clim, ci_low_brier, ci_high_brier, sorted_briers = metrics['brier']
-        df_brier[lag] = (brier_score, ci_low_brier, ci_high_brier, brier_clim)
+        BSS = (brier_clim - brier_score) / brier_clim
+        BSS_low = (brier_clim - ci_low_brier) / brier_clim
+        BSS_high = (brier_clim - ci_high_brier) / brier_clim        
+        df_brier[lag] = (BSS, BSS_low, BSS_high, 
+                        brier_score, ci_low_brier, ci_high_brier, brier_clim)
     print("Original ROC area: {:0.3f}".format( float(df_auc.iloc[0][0]) ))
     #%%
     return df_auc, df_KSS, df_brier, metrics
@@ -851,7 +861,7 @@ def get_KSS_clim(y_true, y_pred, threshold_clim_events):
     return KSS_score 
 
 def metrics_sklearn(y_true, y_pred, y_true_train_clim, alpha=0.05, n_boot=5, blocksize=1):
-    
+#    y_true, y_pred, y_true_train_clim = y_true_c, ts_logit_c, y_true_train_clim_c
     #%%
     metrics = {}
     AUC_score = roc_auc_score(y_true, y_pred)
@@ -894,7 +904,6 @@ def metrics_sklearn(y_true, y_pred, y_true_train_clim, alpha=0.05, n_boot=5, blo
             # We need at least one positive and one negative sample for ROC AUC
             # to be defined: reject the sample
             continue
-    
         score_AUC = roc_auc_score(y_true[indices], y_pred[indices])
         score_KSS = get_KSS_clim(y_true[indices], y_pred[indices], threshold_clim_events)
         score_brier = brier_score_loss(y_true[indices], y_pred[indices])
@@ -914,11 +923,18 @@ def metrics_sklearn(y_true, y_pred, y_true_train_clim, alpha=0.05, n_boot=5, blo
         ci_high = sorted_scores[int((1-alpha) * len(sorted_scores))]
         return ci_low, ci_high, sorted_scores
     
-    ci_low_AUC, ci_high_AUC, sorted_AUCs = get_ci(bootstrapped_AUC, alpha)
-    
-    ci_low_KSS, ci_high_KSS, sorted_KSSs = get_ci(bootstrapped_KSS, alpha)
-    
-    ci_low_brier, ci_high_brier, sorted_briers = get_ci(bootstrapped_brier, alpha)
+    if len(bootstrapped_AUC) != 0:
+        ci_low_AUC, ci_high_AUC, sorted_AUCs = get_ci(bootstrapped_AUC, alpha)
+        
+        ci_low_KSS, ci_high_KSS, sorted_KSSs = get_ci(bootstrapped_KSS, alpha)
+        
+        ci_low_brier, ci_high_brier, sorted_briers = get_ci(bootstrapped_brier, alpha)
+    else:
+        ci_low_AUC, ci_high_AUC, sorted_AUCs = (AUC_score, AUC_score, [AUC_score])
+        
+        ci_low_KSS, ci_high_KSS, sorted_KSSs = (KSS_score, KSS_score, [KSS_score])
+        
+        ci_low_brier, ci_high_brier, sorted_briers = (brier_score, brier_score, [brier_score])
     
    
     metrics['AUC'] = (AUC_score, ci_low_AUC, ci_high_AUC, sorted_AUCs)
@@ -960,12 +976,19 @@ def autocorr_sm(ts, max_lag=None, alpha=0.01):
                                  fft=True)
     return (ac, con_int)
 
-def get_bstrap_size(ts, max_lag=200):
+def get_bstrap_size(ts, max_lag=200, n=1):
     ac, con_int = autocorr_sm(ts, max_lag=max_lag, alpha=0.01)
+    plt.figure()
+    # con high
+    plt.plot(con_int[:,1][:20], color='orange')
+    # ac values
+    plt.plot(range(20),ac[:20])
+    # con low
+    plt.plot(con_int[:,0][:20], color='orange')
     where = np.where(con_int[:,0] < 0 )[0]
-    # has to be below 0 for 3 times (not necessarily consecutive):
+    # has to be below 0 for n times (not necessarily consecutive):
     n_of_times = np.array([idx+1 - where[0] for idx in where])
-    cutoff = where[np.where(n_of_times >= 2)[0][0] -1]
+    cutoff = where[np.where(n_of_times == n)[0][0] ]
     return cutoff
 
 
@@ -1100,15 +1123,13 @@ def sig_bold_annot(corr, pvals):
     
     
     
-def spatial_cov(RV_ts, ex, path_ts, key1='spatcov_CPPA'):
+def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
     #%%
     '''
     Function input:
         ex['method'] = 'random10fold', 'iter', 'no_train_test_split'
         
     '''
-    path_ts = ex['output_ts_folder']
-    lag = 0
     
     if ex['method'][:6] == 'random': ex['score_per_fold'] = True
     ex['size_test'] = ex['train_test_list'][0][1]['RV'].size
@@ -1116,54 +1137,72 @@ def spatial_cov(RV_ts, ex, path_ts, key1='spatcov_CPPA'):
     SCORE = SCORE_CLASS(ex)
     #    SCORE.n_boot = 100
     print(f"n bootstrap is: {SCORE.n_boot}")
-
     
-    SCORE.dates_test = np.zeros( (ex['n_conv'], ex['size_test']), dtype='datetime64[D]')
+    
+    
+#    all_y_f = SCORE.RVfullts.time.dt.year.values
+    all_y_RV = SCORE.RV_ts.time.dt.year.values
+    size_test = int(round(SCORE._n_yrs_test / ex['n_yrs'], 1) * all_y_RV.size)
+    SCORE.dates_test = np.zeros( (SCORE._n_conv, size_test), dtype='datetime64[D]')
     for n in range(len(ex['train_test_list'])):
         ex['n'] = n     
         
         test  = ex['train_test_list'][n][1]
         RV_ts_test = test['RV']
+        test_yrs = list(set(test['RV'].time.dt.year.values))
+        
+        test_y_i = [i for i in range(len(all_y_RV)) if all_y_RV[i] in test_yrs]
+#        RVfullts_test = SCORE.RVfullts.isel(time=test_y_i)
+        
+        RV_ts_test = SCORE.RV_ts.isel(time=test_y_i)
         dates_test = pd.to_datetime(RV_ts_test.time.values)
         SCORE.dates_test[ex['n']] = dates_test
-        test_years = list(set(test['RV'].time.dt.year.values))
+#        dates_test_str = [d[:10] for d in dates_test.strftime('%Y-%m-%d')]
+
+        print('Test years {}'.format( np.unique(pd.to_datetime(dates_test).year)) )
         
         dates_train = pd.to_datetime([i for i in SCORE.dates_RV if i not in dates_test])
-        RV_ts_train = RV_ts.sel(time=dates_train)
-        RV_ts_test  = RV_ts.sel(time=dates_test)
-        for lag_idx, lag in enumerate(ex['lags']):
-            # load in timeseries
-            csv_train_test_data = 'testyr{}_{}.csv'.format(test_years, lag)
+        RV_ts_train = SCORE.RV_ts.sel(time=dates_train)
+        RV_ts_test  = SCORE.RV_ts.sel(time=dates_test)
+        csv_train_test_data = 'testyr{}_{}.csv'.format(test_yrs, 0)
+        path = os.path.join(path_ts, csv_train_test_data)
+        data = pd.read_csv(path, index_col='date', infer_datetime_format=True)
+        data.index = pd.to_datetime(data.index)
+        dates_tfreq = func_CPPA.timeseries_tofit_bins(
+                                data.index, ex, seldays='all', verb=0)
+        data = data.loc[dates_tfreq]
+        
+        def get_ts(data, SCORE, dates, keys, tfreq):           
+            csv_train_test_data = 'testyr{}_{}.csv'.format(test_yrs, lag_to_load)
             path = os.path.join(path_ts, csv_train_test_data)
             data = pd.read_csv(path, index_col='date')
-            
-            dates_train_min_lag = dates_train - pd.Timedelta(lag, unit='d')
-            dates_train_min_lag = [d[:10] for d in dates_train_min_lag.strftime('%Y-%m-%d')]
-            
-            
-            predictor_train = data.loc[dates_train_min_lag][key1].values
-            add_training_data(RV_ts_train, predictor_train, SCORE, lag_idx, ex)
-            
-            
-        train = ex['train_test_list'][n][0]
-        RV_ts_train = train['RV']
 
+            data.index = pd.to_datetime(data.index)
+            xarray = data.to_xarray().to_array().rename({'date':'time'})
+            if tfreq != 1:
+                xarray, dates_all = func_CPPA.time_mean_bins(xarray, ex)
+            # time mean bins 
+            xr_ts = xr.DataArray(np.zeros( (dates.size, len(SCORE._lags), len(keys)) ), 
+                                 dims=['time', 'lag', 'variable'],  
+                                 coords=[dates, SCORE._lags, keys,])
+            for l, lag in enumerate(SCORE._lags):
+                dates_min_lag = pd.to_datetime(dates - pd.Timedelta(l*ex['tfreq'], unit='d'))
+                if dates_min_lag.min() < SCORE.dates_all.min():
+                    print('lag too large')
+                xr_ts.values[:,l,:] = xarray.sel(variable=keys).sel(time=dates_min_lag).values.swapaxes(0,1)
+                    
+            return xr_ts.squeeze(dim='variable')
+        
 
-        dates_train = pd.to_datetime(RV_ts_train.time.values)
-
+        predictor_train = get_ts(data, SCORE, dates_train, keys, ex['tfreq'])
+        add_training_data_lags(RV_ts_train, predictor_train.values, SCORE, ex)
         
-        spatcov = calculate_spatcov(Prec_train_reg, SCORE._lags, dates_train, ds_Sem, 
-                                    PEPpattern=SCORE.PEPpattern)
+        precursor_test = get_ts(data, SCORE, dates_test, keys, ex['tfreq'])
+        add_test_data(RV_ts_test, precursor_test.values, SCORE, ex)
         
-        add_training_data(RV_ts_train, spatcov, SCORE, ex)
+   
         
         
-        spatcov = calculate_spatcov(Prec_test_reg, SCORE._lags, dates_test, ds_Sem, 
-                            PEPpattern=SCORE.PEPpattern)
-        
-        add_test_data(RV_ts_test, spatcov, SCORE, ex)
-        
-        print('Test years {}'.format( np.unique(pd.to_datetime(dates_test).year)) )
     print('Calculate scores')
     
     get_scores_per_fold(SCORE)
@@ -1175,77 +1214,14 @@ def spatial_cov(RV_ts, ex, path_ts, key1='spatcov_CPPA'):
                                                                       SCORE.predmodel_2,
                                                                       n_boot=SCORE.n_boot)
     
-
-    for n in range(len(ex['train_test_list'])):
-        ex['n'] = n
-        
-        test = ex['train_test_list'][n][1]
-        ex['test_year'] = list(set(test['RV'].time.dt.year.values))
-        if 'use_ts_logit' not in ex.keys() or ex['use_ts_logit'] == False:
-            print('test year(s) {}'.format(ex['test_year']))
-
-        csv_train_test_data = 'testyr{}_{}.csv'.format(ex['test_year'], 0)
-        path = os.path.join(ex['output_ts_folder'], csv_train_test_data)
-        key1test = pd.read_csv(path, index_col='date')[key1]
-        dates = pd.to_datetime(key1test.index)            
-        if n == 0:
-            onlytest = pd.DataFrame(np.zeros( (key1test.index.size) ), 
-                                    index=dates, columns=[key1] )  
-                                 
-        
-        # get RV dates (period analyzed)
-        all_years = list(dates.year)
-        test_idx_full = [i for i in range(len(all_years)) if all_years[i] in ex['test_year']]
-        dates_test_full = dates[test_idx_full]
-        onlytest[key1].loc[dates_test_full] = pd.Series(key1test.iloc[test_idx_full].values,
-                                                        index=dates_test_full)
-                                        
-        dates_test = pd.to_datetime(test['RV'].time.values)
-        
-        for lag_idx, lag in enumerate(ex['lags']):
-            # load in timeseries
-            csv_train_test_data = 'testyr{}_{}.csv'.format(ex['test_year'], lag)
-            path = os.path.join(ex['output_ts_folder'], csv_train_test_data)
-            data = pd.read_csv(path, index_col='date')
-            
-#            # match hour
-#            hour = pd.to_datetime(data.index[0]).hour
-#            dates_test += pd.Timedelta(hour, unit='h')
-            ### only test data ###
-            dates_test_lag = func_CPPA.func_dates_min_lag(dates_test, lag)[0]
-            dates_test_lag = [d[:10] for d in dates_test_lag]
-            
-            
-            idx = lag_idx
-            if 'use_ts_logit' not in ex.keys() or ex['use_ts_logit'] == False:
-                # spatial covariance CPPA
-                spat_cov_lag_i = data.loc[dates_test_lag][key1]
-                
-            
-                if ex['n'] == 0:
-                    ex['test_ts_prec'][idx] = spat_cov_lag_i.values
-        #                ex['test_RV_Sem'][idx]  = test['RV'].values
-                else:
-                    ex['test_ts_prec'][idx] = np.concatenate( [ex['test_ts_prec'][idx], spat_cov_lag_i.values] ) 
-            
-
-
-            if ex['n'] == 0:
-                ex['test_RV'][idx]     = test['RV'].values
-                ex['test_yrs'][idx]    = test['RV'].time
-    #                ex['test_RV_Sem'][idx]  = test['RV'].values
-            else:
-                ex['test_RV'][idx]     = np.concatenate( [ex['test_RV'][idx], test['RV'].values] )  
-                ex['test_yrs'][idx]    = np.concatenate( [ex['test_yrs'][idx], test['RV'].time] )  
-    
-    
-    RVfullts = xr.DataArray(data=onlytest.values.squeeze(), coords=[dates], dims=['time'])
-    filename = '{}_only_test_ts'.format(key1)
-    try:
-        to_dict = dict( { 'mask'      : ex['mask'],
-                     'RVfullts'   : RVfullts} )
-    except:
-        to_dict = dict( {'RVfullts'   : RVfullts} )
-    np.save(os.path.join(ex['output_ts_folder'], filename+'.npy'), to_dict)  
+    ex['SCORE'] = SCORE
+#    RVfullts = xr.DataArray(data=onlytest.values.squeeze(), coords=[dates], dims=['time'])
+#    filename = '{}_only_test_ts'.format(key1)
+#    try:
+#        to_dict = dict( { 'mask'      : ex['mask'],
+#                     'RVfullts'   : RVfullts} )
+#    except:
+#        to_dict = dict( {'RVfullts'   : RVfullts} )
+#    np.save(os.path.join(ex['output_ts_folder'], filename+'.npy'), to_dict)  
     #%%
-    return ex
+    return SCORE, ex

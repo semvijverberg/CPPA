@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from load_data import load_1d
+from load_data import load_response_variable
+from func_CPPA import time_mean_bins
 import ROC_score
 
 class SCORE_CLASS():
@@ -57,11 +58,13 @@ class SCORE_CLASS():
         else:
             self.grouped = ex['grouped']
             
-        filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])        
-        self.RVtsfull = load_1d(filename, ex)[0]
+        
+        self.RVfullts, self.RV_ts, ex = load_response_variable(ex)
+        self.dates_all = pd.to_datetime(self.RVfullts.time.values)
+        self.dates_RV = pd.to_datetime(self.RV_ts.time.values)
         
         self.ROC_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )
-        self.dates_RV = ex['dates_RV']
+        
         self.RV_test        = pd.DataFrame(data=np.zeros( (self.dates_RV.size ) ), 
                                            index = self.dates_RV)
         self.y_true_test        = pd.DataFrame(data=np.zeros( (self.dates_RV.size ) ), 
@@ -75,7 +78,7 @@ class SCORE_CLASS():
                                            columns=ex['lags'], 
                                            index = self.dates_RV) 
         # training data is different every train test set.
-        trainsize = ex['n_oneyr'] * (ex['n_yrs'] - self._n_yrs_test)
+        trainsize = int(ex['n_oneyr'] * (ex['n_yrs'] - self._n_yrs_test))
         shape_train_RV          = (self._n_conv, trainsize ) 
         self.RV_train           = np.zeros( shape_train_RV )
         self.y_true_train       = np.zeros( shape_train_RV )
@@ -83,15 +86,15 @@ class SCORE_CLASS():
         self.Prec_train         = np.zeros( shape_train )
 
         
-        self.AUC  = pd.DataFrame(data=np.zeros( shape ), 
+        self.AUC  = pd.DataFrame(data=np.zeros( shape )*np.nan, 
                                      columns=ex['lags'])
-        self.KSS  = pd.DataFrame(data=np.zeros( shape ), 
+        self.KSS  = pd.DataFrame(data=np.zeros( shape )*np.nan, 
                                      columns=ex['lags'])
-        self.BSS  = pd.DataFrame(data=np.zeros( shape ), 
+        self.BSS  = pd.DataFrame(data=np.zeros( shape )*np.nan, 
                                      columns=ex['lags'])
-        self.ROC_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )
-        self.KSS_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )
-        self.FP_TP    = np.zeros( shape , dtype=list )
+        self.ROC_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )*np.nan
+        self.KSS_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )*np.nan
+        self.FP_TP    = np.zeros( shape , dtype=list )*np.nan
         
         self.RV_thresholds      = np.zeros( (self._n_conv) )
         shape_stat = (self._n_conv, len(ex['lags']) )
@@ -106,13 +109,7 @@ class SCORE_CLASS():
                                           coords=[range(shape_stat[0]), ex['lags'], pthresholds], 
                                           dims=['n_tests', 'lag','percentile'], 
                                           name='percentiles') 
-        filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-        if 'RV_aggregation' not in ex.keys():
-            self.RV_aggregation = 'RVfullts95'
-        else:
-            self.RV_aggregation = ex['RV_aggregation']
-        self.RVfullts = load_1d(filename, ex, self.RV_aggregation)[0]
-        self.dates_all = pd.to_datetime(self.RVfullts.time.values)
+     
         self.bootstrap_size = min(10, ROC_score.get_bstrap_size(self.RVfullts))
         print(f"n_block_bootstrapsize is: {self.bootstrap_size}")
     @property

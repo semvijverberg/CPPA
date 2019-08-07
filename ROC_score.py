@@ -16,11 +16,12 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import statsmodels.formula.api as sm
 from itertools import chain
+from sklearn import metrics
 from statsmodels.api import add_constant
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.metrics import brier_score_loss
 from load_data import load_1d
-
+flatten = lambda l: [item for sublist in l for item in sublist]
 
 from scoringclass import SCORE_CLASS
     
@@ -977,6 +978,7 @@ def autocorr_sm(ts, max_lag=None, alpha=0.01):
     return (ac, con_int)
 
 def get_bstrap_size(ts, max_lag=200, n=1):
+    max_lag = min(max_lag, ts.size)
     ac, con_int = autocorr_sm(ts, max_lag=max_lag, alpha=0.01)
     plt.figure()
     # con high
@@ -995,11 +997,15 @@ def get_bstrap_size(ts, max_lag=200, n=1):
 def get_ts_matrix(Prec_reg, final_pattern, ex, lag=0):
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])        
     RVtsfull95 = load_1d(filename, ex, 'RVfullts95')[0]
-    RVtsfull_mean = load_1d(filename, ex, 'RVfullts_mean')[0]    
+    RVtsfull95 = func_CPPA.remove_leapdays(RVtsfull95)
+#    RVtsfull_mean = load_1d(filename, ex, 'RVfullts_mean')[0]  
     
-    
-    crosscorr_Sem = func_CPPA.cross_correlation_patterns(Prec_reg, 
-                                                            final_pattern.sel(lag=lag))
+    PEP_box = func_CPPA.find_region(Prec_reg, region='PEPrectangle')[0]
+    PEP_pattern = PEP_box.sel(time=ex['dates_RV']).mean(dim='time')
+    PEP = func_CPPA.cross_correlation_patterns(PEP_box, PEP_pattern).values
+                                           
+    Prec_Patt = func_CPPA.cross_correlation_patterns(Prec_reg, 
+                                         final_pattern.sel(lag=lag)).values
     
     ts_3d_nino = func_CPPA.find_region(Prec_reg, region='elnino3.4')[0]
     nino_index = func_CPPA.area_weighted(ts_3d_nino).mean(
@@ -1021,14 +1027,14 @@ def get_ts_matrix(Prec_reg, final_pattern, ex, lag=0):
     dates = pd.to_datetime(Prec_reg.time.values)
     dates -= pd.Timedelta(dates.hour[0], unit='h')
 
-    data = np.stack([RVtsfull95, RVtsfull_mean, crosscorr_Sem, PDO_ts.values, nino_index])
+    data = np.stack([RVtsfull95, PEP, Prec_Patt, PDO_ts.values, nino_index])
     df = pd.DataFrame(data=data.swapaxes(1,0), index=pd.DatetimeIndex(dates),
-                      columns=['tmax 95th perc.', 'tmax mean', 
+                      columns=['T95 E-U.S.', 'PEP', 
                                'Prec. Pattern', 'PDO', 'Nino3.4'])
     
     return df
 
-def build_matrix_wrapper(df_init, ex, lag=[0], wins=[0, 20]):
+def build_matrix_wrapper(df_init, ex, lag=[0], wins=[1, 20]):
     
     periods = ['fullyear', 'summer60days', 'pre60days']
     for win in wins:
@@ -1118,10 +1124,78 @@ def sig_bold_annot(corr, pvals):
     return np.array(corr_str)              
     
     #%%
-#    data = 
-#    pd.DataFrame(data = nino_index[:,None], index=dates, columns=['nino3.4']) 
+def add_scores_to_class(SCORE, n_shuffle=1000):
+    #%%
+    y_true = SCORE.y_true_test
+#    thresholds = [[(1-y_true[y_true.values==1.].size / y_true.size)]]
+#    thresholds.append([t/10. for t in range(2, 10, 2)])
+    thresholds = [t/100. for t in range(25, 100, 25)]
+#    thresholds = flatten(thresholds)
     
     
+    list_dfs = []
+    for lag in SCORE._lags:
+        metric_names = ['Precision', 'Specifity', 'Recall', 'FPR', 'F1_score', 'Accuracy']
+        stats = ['fc', 'fc shuf', 'best shuf', 'impr.'] 
+        stats_keys = stats * len(thresholds)
+        thres_keys = np.repeat(thresholds, len(stats))
+        data = np.zeros( (len(metric_names), len(stats_keys) ) )
+        df_lag = pd.DataFrame(data=data, dtype=str, 
+                         columns=pd.MultiIndex.from_tuples(zip(thres_keys,stats_keys)),
+                          index=metric_names)
+    
+        for t in thresholds:
+            y_pred = SCORE.predmodel_2[lag]
+            y_pred = y_pred > np.percentile(y_pred.values, 100*t)
+            prec_f = metrics.precision_score(y_true, y_pred)
+            recall_f = metrics.recall_score(y_true, y_pred)
+    #        cm = metrics.confusion_matrix(y_true,  y_pred_lags[l])
+            tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred).ravel()
+            FPR_f = fp / (fp + tn)
+            SP_f = tn / (tn + fp)
+            Acc_f = metrics.accuracy_score(y_true, y_pred)
+            f1_f = metrics.f1_score(y_true, y_pred)
+            # shuffle the predictions 
+            prec = [] ; recall = [] ; FPR = [] ; SP = [] ; Acc = [] ; f1 = []
+            for i in range(n_shuffle):
+                np.random.shuffle(y_pred); 
+                prec.append(metrics.precision_score(y_true, y_pred))
+                recall.append(metrics.recall_score(y_true, y_pred))
+                tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred).ravel()
+                FPR.append(fp / (fp + tn))
+                SP.append(tn / (tn + fp))
+                Acc.append(metrics.accuracy_score(y_true, y_pred))
+                f1.append(metrics.f1_score(y_true, y_pred))
+            
+            df_lag.loc['Precision'][t] = pd.Series([prec_f, np.mean(prec),
+                                          np.percentile(prec, 97.5), prec_f/np.mean(prec)],
+                                            index=stats)
+                                                     
+    
+            df_lag.loc['Recall'][t]  = pd.Series([recall_f, np.mean(recall),
+                                                  np.percentile(recall, 97.5),
+                                                     recall_f/np.mean(recall)],
+                                                    index=stats)
+    #        cm = metrics.confusion_matrix(y_true,  y_pred_lags[l])
+            tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred).ravel()
+            df_lag.loc['FPR'][t] = pd.Series([FPR_f, np.mean(FPR), np.percentile(FPR, 2.5),
+                                                     np.mean(FPR)/FPR_f], index=stats)
+                                                     
+            df_lag.loc['Specifity'][t] = pd.Series([SP_f, np.mean(SP), np.percentile(SP, 97.5), 
+                                                     SP_f/np.mean(SP)], index=stats)
+            df_lag.loc['Accuracy'][t] = pd.Series([Acc_f, np.mean(Acc), np.percentile(Acc, 97.5), 
+                                                      Acc_f/np.mean(Acc)], index=stats)
+            df_lag.loc['F1_score'][t] = pd.Series([f1_f, np.mean(f1), np.percentile(f1, 97.5),
+                                                     f1_f/np.mean(f1)], index=stats)
+        
+        df_lag['mean_impr'] = df_lag.iloc[:, df_lag.columns.get_level_values(1)=='impr.'].mean(axis=1)
+
+        list_dfs.append(df_lag)
+
+    df_sum = pd.concat(list_dfs, keys= SCORE._lags)
+    #%%
+
+    return df_sum
     
 def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
     #%%

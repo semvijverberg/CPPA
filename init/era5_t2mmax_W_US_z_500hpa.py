@@ -40,7 +40,7 @@ def __init__():
          'endperiod'    :       '08-22', #'1982-08-22',
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-         'RVts_filename':       "comp_v_spclus2of4_tempclus2_AgglomerativeClustering_smooth15days_compmean_daily.npy", 
+         'RVts_filename':       "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus2.npy", 
          'RV_name'      :       't2mmax',
          'name'         :       'z_500hpa',
          'add_lsm'      :       False,

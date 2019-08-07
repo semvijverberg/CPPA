@@ -38,6 +38,7 @@ def load_response_variable(ex):
     RVhour   = RVtsfull.time[0].dt.hour.values
     dates_all = pd.to_datetime(RVtsfull.time.values)
     
+    
     datesRV = func_CPPA.make_datestr(dates_all, ex, 
                             ex['startyear'], ex['endyear'], lpyr=lpyr)
  
@@ -70,7 +71,7 @@ def load_response_variable(ex):
     ex['endyear'] = int(datesRV[-1].year)
     
     # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
-    RV_ts = RVtsfull.sel(time=ex['dates_RV'])
+    RV_ts = RVtsfull.sel(time=datesRV)
     ex['n_oneyr'] = func_CPPA.get_oneyr(datesRV).size
     
 
@@ -171,7 +172,11 @@ def load_precursor(ex):
     #%%
     return Prec_reg, ex
 
-    
+def load_data(ex):
+    RVtsfull, RV_ts, ex = load_response_variable(ex)
+    Prec_reg, ex = load_precursor(ex)
+    return RV_ts, Prec_reg, ex
+
 def subset_dates(datesRV, ex):
     oneyr = func_CPPA.get_oneyr(datesRV)
     newstart = (oneyr[0] - pd.Timedelta(max(ex['lags']), 'd') \
@@ -224,10 +229,11 @@ def load_1d(filename, ex, name='RVfullts95'):
                 ex['mask'] = dicRV['RV_array']['mask']
             except:
                 ex['mask'] = dicRV['mask']
-        elif ex['datafolder'] == 'era5':
+        elif ex['datafolder'] == 'era5' and 'mask' in dicRV.keys():
             ex['mask'] = dicRV['mask']
         if ex['datafolder'] == 'ERAint' or ex['datafolder'] == 'era5':
             func_CPPA.xarray_plot(ex['mask'])
+
 
         
         lpyr = False

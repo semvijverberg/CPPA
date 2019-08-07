@@ -36,7 +36,9 @@ def get_oneyr(pddatetime, *args):
         dates = pddatetime.where(pddatetime.year==year).dropna()
     return dates
 
-IPython_default = plt.rcParams.copy()
+# restore default
+mpl.rcParams.update(mpl.rcParamsDefault)
+
 from matplotlib import cycler
 colors_nice = cycler('color',
                 ['#EE6666', '#3388BB', '#9988DD',
@@ -49,11 +51,11 @@ plt.rc('ytick', direction='out', color='black')
 plt.rc('patch', edgecolor='#E6E6E6')
 plt.rc('lines', linewidth=2)
 
-mpl.rcParams['figure.figsize'] = [8.0, 6.0]
+mpl.rcParams['figure.figsize'] = [7.0, 5.0]
 mpl.rcParams['figure.dpi'] = 100
 mpl.rcParams['savefig.dpi'] = 600
 
-mpl.rcParams['font.size'] = 16
+mpl.rcParams['font.size'] = 14
 mpl.rcParams['legend.fontsize'] = 'large'
 mpl.rcParams['figure.titlesize'] = 'medium'
 
@@ -1508,6 +1510,7 @@ def timeseries_tofit_bins(xr_or_dt, ex, seldays='part', verb=1):
         sdate = one_yr[0]
         seldays_pp = pd.DatetimeIndex(start=one_yr[0], end=one_yr[-1],
                                 freq=datetime[1] - datetime[0])
+        
 
     seldays_pp = remove_leapdays(seldays_pp)
     
@@ -1528,12 +1531,14 @@ def timeseries_tofit_bins(xr_or_dt, ex, seldays='part', verb=1):
             # if startday is before the desired starting period, skip one bin forward in time
             start_day = (end_day - (dt * np.round(fit_steps_yr-1, decimals=0))) \
                     + np.timedelta64(1, 'D')
-
+                    
+        if start_day.is_leap_year:
+            # add day in front to compensate for removing a day
+            start_day = start_day - np.timedelta64(1, 'D')
         start_yr = pd.DatetimeIndex(start=start_day, end=end_day,
                                     freq=(datetime[1] - datetime[0]))
-        # exluding leap year from cdo select string
-        noleapdays = (((start_yr.month==2) & (start_yr.day==29))==False)
-        start_yr = start_yr[noleapdays].dropna(how='all')
+        
+        start_yr = remove_leapdays(start_yr)
 
     if ex['input_freq'] == 'monthly':
         dt = date_dt(months=ex['tfreq'])
@@ -1773,11 +1778,17 @@ def import_ds_lazy(filename, ex, loadleap=False, seldates=None):
         ds = ds.sel(time=dates_noleap)
     return ds
 
-def remove_leapdays(datetime):
+def remove_leapdays(datetime_or_xr):
+    if type(datetime_or_xr) != type(pd.to_datetime(['2000-01-01'])):
+        datetime = pd.to_datetime(datetime_or_xr.time.values)
+    else:
+        datetime = datetime_or_xr
     mask_lpyrfeb = np.logical_and((datetime.month == 2), (datetime.day == 29))
-
-    dates_noleap = datetime[mask_lpyrfeb==False]
-    return dates_noleap
+    noleap = datetime[mask_lpyrfeb==False]
+    if type(datetime_or_xr) != type(pd.to_datetime(['2000-01-01'])):
+        noleap = datetime_or_xr.sel(time=noleap)
+        
+    return noleap
     
 def area_weighted(xarray):
     # Area weighted, taking cos of latitude in radians     
@@ -2230,10 +2241,14 @@ def plot_precursor_regions(l_ds, n_tests, key_pattern_num, lags, subtitles, ex):
     for r in np.unique(flatten(reg_labels)):
         key = flatten(reg_labels).count(r)
         counting[key] = r
+    # order by key 
+    from collections import OrderedDict
+    counting = OrderedDict(sorted(counting.items(), key=lambda t: t[0], reverse=True))
     ex['max_N_regs'] = 1
     for k in counting.keys():
         if k < 0.5 * ex['n_conv'] * len(lags):
             ex['max_N_regs'] = int(counting[k]) + 1   
+           
             break
     
     for n in np.linspace(0, ex['n_conv']-1, n_tests, dtype=int): 
@@ -2565,8 +2580,11 @@ def plot_oneyr_events(xarray, ex, test_year, folder, saving=False):
         plt.savefig(filename+'.png', dpi=300)
 
 def plotting_wrapper(plotarr, ex, filename=None,  kwrgs=None):
-#    map_proj = ccrs.Miller(central_longitude=240)  
-    folder_name = os.path.join(ex['figpathbase'], ex['exp_folder'])
+#    map_proj = ccrs.Miller(central_longitude=240) 
+    try:
+        folder_name = os.path.join(ex['figpathbase'], ex['exp_folder'])
+    except:
+        folder_name = '/Users/semvijverberg/Downloads'
     if os.path.isdir(folder_name) != True : 
         os.makedirs(folder_name)
 
@@ -2675,7 +2693,7 @@ def finalfigure(xrdata, file_name, kwrgs):
                            colors='none', add_colorbar=False,
                            subplot_kws={'projection': map_proj})
             
-        ax.coastlines(color='black', alpha=0.3, facecolor='grey')
+        ax.coastlines(color='black', alpha=0.3, facecolor='grey', linewidth=2)
         ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
         
         ax.set_extent([lons[0], lons[-1], lats[0], lats[-1]], ccrs.PlateCarree())
@@ -2815,7 +2833,7 @@ def finalfigure(xrdata, file_name, kwrgs):
     if kwrgs['savefig'] != False:
         g.fig.savefig(file_name ,dpi=250, frameon=True)
     
-    return
+    return g.fig
 
 
 

@@ -12,6 +12,7 @@ import xarray as xr
 
 from load_data import load_response_variable
 from func_CPPA import time_mean_bins
+from func_CPPA import get_oneyr
 import ROC_score
 
 class SCORE_CLASS():
@@ -58,10 +59,12 @@ class SCORE_CLASS():
         else:
             self.grouped = ex['grouped']
             
-        
+        self.tfreq = ex['tfreq']
         self.RVfullts, self.RV_ts, ex = load_response_variable(ex)
         self.dates_all = pd.to_datetime(self.RVfullts.time.values)
         self.dates_RV = pd.to_datetime(self.RV_ts.time.values)
+        self.n_oneyr_RV = get_oneyr(self.dates_RV).size
+        self.n_oneyr    = get_oneyr(self.dates_all).size
         
         self.ROC_boot = np.zeros( (shape[0], shape[1], self.n_boot ) )
         
@@ -110,7 +113,7 @@ class SCORE_CLASS():
                                           dims=['n_tests', 'lag','percentile'], 
                                           name='percentiles') 
      
-        self.bootstrap_size = min(10, ROC_score.get_bstrap_size(self.RVfullts))
+        self.bootstrap_size = min(self.n_oneyr_RV, ROC_score.get_bstrap_size(self.RVfullts))
         print(f"n_block_bootstrapsize is: {self.bootstrap_size}")
     @property
     def get_pvalue_AUC(self):

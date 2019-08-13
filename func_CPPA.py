@@ -1472,7 +1472,7 @@ def Ev_binary(events_idx, n_timesteps, min_dur, max_break, grouped=False):
 #    return datesdt
     
 
-def timeseries_tofit_bins(xr_or_dt, ex, seldays='part', verb=1):
+def timeseries_tofit_bins(xr_or_dt, ex, to_freq, seldays='part', verb=1):
     #%%
     
     from dateutil.relativedelta import relativedelta as date_dt
@@ -1482,9 +1482,7 @@ def timeseries_tofit_bins(xr_or_dt, ex, seldays='part', verb=1):
     else:
         datetime = xr_or_dt
         
-
     datetime = remove_leapdays(datetime)
-
 # =============================================================================
 #   # select dates
 # =============================================================================
@@ -1515,7 +1513,7 @@ def timeseries_tofit_bins(xr_or_dt, ex, seldays='part', verb=1):
     seldays_pp = remove_leapdays(seldays_pp)
     
     if ex['input_freq'] == 'daily':
-        dt = np.timedelta64(ex['tfreq'], 'D')
+        dt = np.timedelta64(to_freq, 'D')
         end_day = seldays_pp.max()
         start_day = seldays_pp.min()
         # after time averaging over 'tfreq' number of days, you want that each year
@@ -1541,12 +1539,12 @@ def timeseries_tofit_bins(xr_or_dt, ex, seldays='part', verb=1):
         start_yr = remove_leapdays(start_yr)
 
     if ex['input_freq'] == 'monthly':
-        dt = date_dt(months=ex['tfreq'])
+        dt = date_dt(months=to_freq)
         start_day = ex['adjhrsstartdate'].split(' ')[0]
         start_day = pd.to_datetime(start_day.replace(start_day[-2:], '01'))
         end_day = ex['adjhrsenddate'].split(' ')[0]
         end_day = pd.to_datetime(end_day.replace(end_day[-2:], '01'))
-        fit_steps_yr = (end_day.month - start_day.month + 1) / ex['tfreq']
+        fit_steps_yr = (end_day.month - start_day.month + 1) / to_freq
         start_day = (end_day - (dt * int(fit_steps_yr))) \
                 + date_dt(months=+1)
         days_back = end_day
@@ -1581,10 +1579,10 @@ def timeseries_tofit_bins(xr_or_dt, ex, seldays='part', verb=1):
         enddatestr   = '{} {}'.format(end_day.day, months[end_day.month])
         if ex['input_freq'] == 'daily':
             print('Period of year selected: \n{} to {}, tfreq {} days'.format(
-                    startdatestr, enddatestr, ex['tfreq']))
+                    startdatestr, enddatestr, to_freq))
         if ex['input_freq'] == 'monthly':
             print('Months of year selected: \n{} to {}, tfreq {} months'.format(
-                    startdatestr.split(' ')[-1], enddatestr.split(' ')[-1], ex['tfreq']))
+                    startdatestr.split(' ')[-1], enddatestr.split(' ')[-1], to_freq))
     
     if type(xr_or_dt) == type(xr.DataArray([0])):
         adj_xarray = xr_or_dt.sel(time=datesdt)
@@ -1600,7 +1598,7 @@ def prevent_lag_mismatch(dates_lag, dates_available):
         dates_lag = dates_lag[mask_matching]
     return dates_lag
 
-def time_mean_bins(xarray, ex, verb=0):
+def time_mean_bins(xarray, ex, to_freq=int, verb=0):
     #%%
     datetime = pd.to_datetime(xarray['time'].values)
      # ensure to remove leapdays
@@ -1608,7 +1606,7 @@ def time_mean_bins(xarray, ex, verb=0):
     xarray = xarray.sel(time=datetime)
     one_yr = datetime.where(datetime.year == datetime.year[0]).dropna(how='any')
     
-    if one_yr.size % ex['tfreq'] != 0:
+    if one_yr.size % to_freq != 0:
         possible = []
         for i in np.arange(1,20):
             if one_yr.size%i == 0:
@@ -1616,7 +1614,7 @@ def time_mean_bins(xarray, ex, verb=0):
         if verb == 1:
             print('Note: stepsize {} does not fit in one year\n '
                              ' supply an integer that fits {}'.format(
-                                 ex['tfreq'], one_yr.size))   
+                                 to_freq, one_yr.size))   
             print('\n Stepsize that do fit are {}'.format(possible))
             print('\n Will shorten the \'subyear\', so that the temporal'
                   ' frequency fits in one year')
@@ -1628,11 +1626,11 @@ def time_mean_bins(xarray, ex, verb=0):
           
     else:
         pass
-    fit_steps_yr = (one_yr.size )  / ex['tfreq']
-    bins = list(np.repeat(np.arange(0, fit_steps_yr), ex['tfreq']))
+    fit_steps_yr = (one_yr.size )  / to_freq
+    bins = list(np.repeat(np.arange(0, fit_steps_yr), to_freq))
     n_years = np.unique(datetime.year).size
     for y in np.arange(1, n_years):
-        x = np.repeat(np.arange(0, fit_steps_yr), ex['tfreq'])
+        x = np.repeat(np.arange(0, fit_steps_yr), to_freq)
         x = x + fit_steps_yr * y
         [bins.append(i) for i in x]
     label_bins = xr.DataArray(bins, [xarray.coords['time'][:]], name='time')
@@ -1641,8 +1639,8 @@ def time_mean_bins(xarray, ex, verb=0):
     xarray['time_dates'] = label_dates
     xarray = xarray.set_index(time=['bins','time_dates'])
     
-    half_step = ex['tfreq']/2.
-    newidx = np.arange(half_step, datetime.size, ex['tfreq'], dtype=int)
+    half_step = to_freq/2.
+    newidx = np.arange(half_step, datetime.size, to_freq, dtype=int)
     newdate = label_dates[newidx]
     
 

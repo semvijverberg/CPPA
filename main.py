@@ -215,7 +215,7 @@ ex['store_timeseries'] = False
 #ex['grouped'] = True
 #ex['lags'] = [0, 20, 40]
 #ex['store_timeseries']  = False
-#ex['event_percentile']  = 50
+ex['event_percentile']  = 50
 #ex['min_dur']           = 4
 #ex['max_break']         = 0
 #if ex['event_percentile'] == 'std':
@@ -275,7 +275,7 @@ else:
     key_pattern_num = 'pat_num_CPPA'
     ex, SCORE = ROC_score.only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
     ex['score'] = SCORE
-    filename_2 = 'output_main_dic_with_score'
+    filename_2 = 'output_main_dic_with_score_th{}'.format(ex['event_percentile'])
     to_dict = dict( { 'ex'      :   ex,
                      'l_ds_CPPA' : l_ds_CPPA} )
     np.save(os.path.join(output_dic_folder, filename_2+'.npy'), to_dict) 
@@ -288,12 +288,12 @@ ROC_score.create_validation_plot([output_dic_folder], metric='brier', getPEP=Fal
 path_ts = ex['output_ts_folder']
 ex['n_boot'] = 1000
 lag_to_load = 0
-lags_to_test = [0,1]#[0,20,30,40,50,60]
+lags_to_test = [0, 20] #np.arange(0, 15+1E-9,1, dtype=int)
 ex['event_percentile'] = 50 # 50 'std'
 #frequencies = np.array(np.arange(0, 140., 2.5),dtype=int) ; frequencies[0]=int(1)
 #frequencies = np.array(np.arange(0, 90., 2.5),dtype=int) ; frequencies[0]=int(1)
 
-frequencies = [20]
+frequencies = [1]
 
 
 scores_ = ['BSS', 'BSS_low', 'BSS_high', 'AUC', 'AUC_low', 'AUC_high']
@@ -329,66 +329,50 @@ np.save(os.path.join(output_dic_folder, filename_3+'.npy'), to_dict)
 
 
 #%%
-#filename_3 = 'list_tfreqs_1_50_trh50'
-import seaborn as sns
+#filename_3 = 'list_tfreqs_1_1_lag[051015202530354045505560657075]_trh50_nb1000'
+
 to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
 dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
-def plot_score_freq(dict_tfreq, metric, lags_to_test):
-    x = list(dict_tfreq.keys())
-    if metric == 'BSS':
-        y_lim = (-0.6, 0.6)
-        y = np.array([dict_tfreq[f].brier_logit.loc['BSS'].values for f in x])
-        y_min = np.array([dict_tfreq[f].brier_logit.loc['BSS_high'].values for f in x])
-        y_max = np.array([dict_tfreq[f].brier_logit.loc['BSS_low'].values for f in x])
-    elif metric == 'AUC':
-        y_lim = (0.4,1.0)
-        y = np.array([dict_tfreq[f].AUC_spatcov.loc['AUC'].values for f in x])
-        y_min = np.array([dict_tfreq[f].AUC_spatcov.loc['con_low'].values for f in x])
-        y_max = np.array([dict_tfreq[f].AUC_spatcov.loc['con_high'].values for f in x])
-    df = pd.DataFrame(np.swapaxes(y, 1,0), 
-                      index=None, columns = x)
-    df['lag'] = pd.Series(lags_to_test, index=df.index)
-    
-    
-    g = sns.FacetGrid(df, col='lag', size=3, aspect=1.4,sharey=True, 
-                      col_wrap=len(lags_to_test), ylim=y_lim)
 
-    for i, ax in enumerate(g.axes.flatten()):
-        l = df['lag'][i]
-        
-        ax.scatter(x, y[:,i].squeeze(), s = 8)
-        ax.scatter(x, y_min[:,i].squeeze(), s=4, marker="_")
-        ax.scatter(x, y_max[:,i].squeeze(), s=4, marker="_")
-        ax.set_ylabel(metric) ; ax.set_xlabel('Time Aggregation')
-        ax.grid(b=True, which='major')
-        ax.set_title('lag {}'.format(l))
-        if min(x) == 1:
-            xmin = 0
-        else:
-            xmin = min(x)
-        xticks = np.arange(xmin, max(x)+1E-9, 10) ; 
-        if min(x) == 1:
-            xticks[0] = 1
-        ax.set_xticks(xticks)
-        if metric == 'BSS':
-            y_major = [-0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6]
-            ax.set_yticks(y_major, minor=False)
-            ax.set_yticklabels(y_major)
-            ax.set_yticks(np.arange(-0.6,0.6+1E-9, 0.1), minor=True)
-            ax.hlines(y=0, xmin=min(x), xmax=max(x), linewidth=1)
-        elif metric == 'AUC':
-            ax.set_yticks(np.arange(0.5,1+1E-9, 0.1), minor=True)
-            ax.hlines(y=0.5, xmin=min(x), xmax=max(x), linewidth=1)
-        
-#    str_freq = str(x).replace(' ' ,'')  
-    lags_str = str(lags_to_test).replace(' ' ,'')        
-    f_name = '{}_tfreqs_{}-{}_lag{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
-              lags_str, ex['event_percentile'], ex['n_boot'])
-    filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
-    plt.savefig(filename, dpi=600, bbox_inches='tight')
-    plt.show()
-plot_score_freq(dict_tfreq, 'BSS', lags_to_test)
-plot_score_freq(dict_tfreq, 'AUC', lags_to_test)
+metric = 'BSS'
+x = list(dict_tfreq.keys())
+ROC_score.plot_score_freq(dict_tfreq, 'BSS', lags_to_test)
+lags_str = str(lags_to_test).replace(' ' ,'')        
+f_name = '{}_tfreqs_{}-{}_lag{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
+          lags_str, ex['event_percentile'], ex['n_boot'])
+filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
+plt.savefig(filename, dpi=600, bbox_inches='tight')
+plt.show()
+
+metric = 'AUC'
+x = list(dict_tfreq.keys())
+ROC_score.plot_score_freq(dict_tfreq, 'AUC', lags_to_test)
+lags_str = str(lags_to_test).replace(' ' ,'')        
+f_name = '{}_tfreqs_{}-{}_lag{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
+          lags_str, ex['event_percentile'], ex['n_boot'])
+filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
+plt.savefig(filename, dpi=600, bbox_inches='tight')
+plt.show()
+#%%
+metric = 'BSS'
+x = list(dict_tfreq.keys())
+ROC_score.plot_score_lags(dict_tfreq, 'BSS', lags_to_test)
+lags_str = str(lags_to_test).replace(' ' ,'')        
+f_name = 'aftertrfeq_{}_lag{}_tf{}-{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
+          lags_str, ex['event_percentile'], ex['n_boot'])
+filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
+plt.savefig(filename, dpi=600, bbox_inches='tight')
+plt.show()
+
+metric = 'AUC'
+x = list(dict_tfreq.keys())
+ROC_score.plot_score_lags(dict_tfreq, 'AUC', lags_to_test)
+lags_str = str(lags_to_test).replace(' ' ,'')        
+f_name = '{}_lag{}_tf{}-{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
+          lags_str, ex['event_percentile'], ex['n_boot'])
+filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
+plt.savefig(filename, dpi=600, bbox_inches='tight')
+plt.show()
 
 #%%
 to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
@@ -437,8 +421,8 @@ if 'score' in ex.keys():
 
 #%% Reliability curve
 from sklearn.calibration import calibration_curve
-lags_to_plot = [1]
-lags_to_plot = [0, 20]
+#lags_to_plot = [1]
+lags_to_plot = [10] #[int(l*frequencies[-1]) for l in lags_to_test[2::4]]
 strategy = 'uniform' # 'quantile' or 'uniform'
 n_bins = 10
 ax = plt.subplot(111, facecolor='white')
@@ -487,9 +471,9 @@ for lag in lags_to_plot:
 #    ax.text(pos_text[0], pos_text[1], 'resolution=reliability', 
 #            horizontalalignment='center', fontsize=14,
 #     verticalalignment='center', rotation=trans_angle, rotation_mode='anchor')
-    ax.fill_between(x, dist_perf, perfect, color='grey', alpha=0.5) 
+    ax.fill_between(x, dist_perf, perfect, color='grey', alpha=0.3) 
     ax.fill_betweenx(perfect, x, np.repeat(obs_clim, x.size), 
-                    color='grey', alpha=0.5) 
+                    color='grey', alpha=0.3) 
 
     # plot forecast
     ax.plot(mean_predicted_value, fraction_of_positives, label=f'fc lag {lag}') ; 

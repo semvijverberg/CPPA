@@ -1202,7 +1202,14 @@ def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
     '''
     Function input:
         ex['method'] = 'random10fold', 'iter', 'no_train_test_split'
-        
+        keys = columns of csv file to load 
+        for ERA5 [2,3,4,5,6,7]
+            East-Pac = 3
+            CARIBEAN = 6
+            MONSOON = 5
+            LAKES = 2
+            ICELAND = 7
+            Mid-Pac = 4 
     '''
     
     if ex['method'][:6] == 'random': ex['score_per_fold'] = True
@@ -1212,9 +1219,7 @@ def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
     #    SCORE.n_boot = 100
     print(f"n bootstrap is: {SCORE.n_boot}")
     
-    
-    
-#    all_y_f = SCORE.RVfullts.time.dt.year.values
+
     all_y_RV = SCORE.RV_ts.time.dt.year.values
     size_test = int(round(SCORE._n_yrs_test / ex['n_yrs'], 1) * all_y_RV.size)
     SCORE.dates_test = np.zeros( (SCORE._n_conv, size_test), dtype='datetime64[D]')
@@ -1243,7 +1248,7 @@ def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
         data = pd.read_csv(path, index_col='date', infer_datetime_format=True)
         data.index = pd.to_datetime(data.index)
         dates_tfreq = func_CPPA.timeseries_tofit_bins(
-                                data.index, ex, seldays='all', verb=0)
+                                data.index, ex, ex['tfreq'], seldays='all', verb=0)
         data = data.loc[dates_tfreq]
         
         def get_ts(data, SCORE, dates, keys, tfreq):           
@@ -1253,19 +1258,22 @@ def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
 
             data.index = pd.to_datetime(data.index)
             xarray = data.to_xarray().to_array().rename({'date':'time'})
+            # check if ts in csv
+            keys = [k for k in keys if k in data.columns]
+            
             if tfreq != 1:
-                xarray, dates_all = func_CPPA.time_mean_bins(xarray, ex)
+                xarray, dates_all = func_CPPA.time_mean_bins(xarray, ex, ex['tfreq'])
             # time mean bins 
             xr_ts = xr.DataArray(np.zeros( (dates.size, len(SCORE._lags), len(keys)) ), 
                                  dims=['time', 'lag', 'variable'],  
-                                 coords=[dates, SCORE._lags, keys,])
+                                 coords=[dates, SCORE._lags, keys])
             for l, lag in enumerate(SCORE._lags):
                 dates_min_lag = pd.to_datetime(dates - pd.Timedelta(l*ex['tfreq'], unit='d'))
                 if dates_min_lag.min() < SCORE.dates_all.min():
                     print('lag too large')
                 xr_ts.values[:,l,:] = xarray.sel(variable=keys).sel(time=dates_min_lag).values.swapaxes(0,1)
                     
-            return xr_ts.squeeze(dim='variable')
+            return xr_ts
         
 
         predictor_train = get_ts(data, SCORE, dates_train, keys, ex['tfreq'])
@@ -1279,8 +1287,35 @@ def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
         
     print('Calculate scores')
     
-    get_scores_per_fold(SCORE)
     
+
+    # test temp aggregation after fitting
+    to_freq = 10
+
+    def change_tfreq(df_in, to_freq=int):
+        df_in.index.name = 'time'
+        xarr = df_in.to_xarray().to_array()
+        
+        xarr, dates_tfreq = func_CPPA.timeseries_tofit_bins(
+                            xarr, ex, to_freq, 
+                            seldays='all', verb=0)
+        if to_freq != 1:
+            xarr, dates_all = func_CPPA.time_mean_bins(xarr, ex, to_freq)
+        
+        df_new = xarr.to_dataframe(name='timeseries')
+        df_new = df_new.reset_index(level='variable').rename(columns={'variable':'lag'})
+        df_new = df_new.pivot_table(values='timeseries', index='time', columns='lag')
+        return df_new
+    
+    if to_freq != 1:
+        SCORE.predmodel_1 = change_tfreq(SCORE.predmodel_1, to_freq=to_freq)
+        SCORE.predmodel_2 = change_tfreq(SCORE.predmodel_2, to_freq=to_freq)
+        SCORE.y_true_test = change_tfreq(SCORE.y_true_test, to_freq=to_freq)
+        SCORE.y_true_test  = SCORE.y_true_test > 0.4
+        SCORE.y_true_train_clim = change_tfreq(SCORE.y_true_train_clim, to_freq=to_freq)
+
+    get_scores_per_fold(SCORE)
+
     SCORE.AUC_spatcov, SCORE.KSS_spatcov, SCORE.brier_spatcov, metrics_sp = get_metrics_sklearn(SCORE,
                                                                             SCORE.predmodel_1,
                                                                             n_boot=SCORE.n_boot)
@@ -1299,3 +1334,120 @@ def spatial_cov(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
 #    np.save(os.path.join(ex['output_ts_folder'], filename+'.npy'), to_dict)  
     #%%
     return SCORE, ex
+
+def plot_score_freq(dict_tfreq, metric, lags_to_test):
+    x = list(dict_tfreq.keys())
+#    x= dict_tfreq[1].lags.values
+    if metric == 'BSS':
+        y_lim = (-0.6, 0.6)
+        y = np.array([dict_tfreq[f].brier_logit.loc['BSS'].values for f in x])
+        y_min = np.array([dict_tfreq[f].brier_logit.loc['BSS_high'].values for f in x])
+        y_max = np.array([dict_tfreq[f].brier_logit.loc['BSS_low'].values for f in x])
+    elif metric == 'AUC':
+        y_lim = (0.4,1.0)
+        y = np.array([dict_tfreq[f].AUC_spatcov.loc['AUC'].values for f in x])
+        y_min = np.array([dict_tfreq[f].AUC_spatcov.loc['con_low'].values for f in x])
+        y_max = np.array([dict_tfreq[f].AUC_spatcov.loc['con_high'].values for f in x])
+    df = pd.DataFrame(np.swapaxes(y, 1,0), 
+                      index=None, columns = x)
+    df['lag'] = pd.Series(lags_to_test, index=df.index)
+    
+    
+    g = sns.FacetGrid(df, col='lag', size=3, aspect=1.4,sharey=True, 
+                      col_wrap=len(lags_to_test), ylim=y_lim)
+
+    for i, ax in enumerate(g.axes.flatten()):
+        l = df['lag'][i]
+        
+        ax.scatter(x, y[:,i].squeeze(), s = 8)
+        ax.scatter(x, y_min[:,i].squeeze(), s=4, marker="_")
+        ax.scatter(x, y_max[:,i].squeeze(), s=4, marker="_")
+        ax.set_ylabel(metric) ; ax.set_xlabel('Time Aggregation')
+        ax.grid(b=True, which='major')
+        ax.set_title('lag {}'.format(l))
+        if min(x) == 1:
+            xmin = 0
+        else:
+            xmin = min(x)
+        xticks = np.arange(xmin, max(x)+1E-9, 10) ; 
+        if min(x) == 1:
+            xticks[0] = 1
+        ax.set_xticks(xticks)
+        if metric == 'BSS':
+            y_major = [-0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6]
+            ax.set_yticks(y_major, minor=False)
+            ax.set_yticklabels(y_major)
+            ax.set_yticks(np.arange(-0.6,0.6+1E-9, 0.1), minor=True)
+            ax.hlines(y=0, xmin=min(x), xmax=max(x), linewidth=1)
+        elif metric == 'AUC':
+            ax.set_yticks(np.arange(0.5,1+1E-9, 0.1), minor=True)
+            ax.hlines(y=0.5, xmin=min(x), xmax=max(x), linewidth=1)
+        
+#    str_freq = str(x).replace(' ' ,'')  
+    #%%
+    return
+
+def plot_score_lags(dict_tfreq, metric, lags_to_test):
+    #%%
+
+    tfreq = list(dict_tfreq.keys())
+    
+    
+    if metric == 'BSS':
+        y_lim = (-0.6, 0.6)
+        y = np.array([dict_tfreq[f].brier_logit.loc['BSS'] for f in tfreq])
+        y_min = np.array([dict_tfreq[f].brier_logit.loc['BSS_high'] for f in tfreq])
+        y_max = np.array([dict_tfreq[f].brier_logit.loc['BSS_low'] for f in tfreq])
+        y_cv  = np.array([dict_tfreq[f].BSS.values for f in tfreq])
+    elif metric == 'AUC':
+        y_lim = (0.4,1.0)
+        y = np.array([dict_tfreq[f].AUC_spatcov.loc['AUC'] for f in tfreq])
+        y_min = np.array([dict_tfreq[f].AUC_spatcov.loc['con_low'] for f in tfreq])
+        y_max = np.array([dict_tfreq[f].AUC_spatcov.loc['con_high'] for f in tfreq])
+        y_cv  = np.array([dict_tfreq[f].AUC.values for f in tfreq])
+
+    df = pd.DataFrame(np.swapaxes(y, 1,0).T, 
+                      index=None, columns = lags_to_test)
+    df['tfreq'] = pd.Series(tfreq, index=df.index)
+    
+    g = sns.FacetGrid(df, col='tfreq', size=3, aspect=1.4,sharey=True, 
+                      col_wrap=len(lags_to_test), ylim=y_lim)
+
+    for i, ax in enumerate(g.axes.flatten()):
+        col = df['tfreq'][i]
+        x = [l*col for l in lags_to_test]
+
+        color = 'red'
+        style = 'solid'
+        ax.fill_between(x, y_min[i,:], y_max[i,:], linestyle='solid', 
+                                edgecolor='black', facecolor=color, alpha=0.3)
+        ax.plot(x, y[i,:], color=color, linestyle=style, 
+                        linewidth=2, alpha=1 ) 
+        for f in range(y_cv.shape[1]):
+            style = 'dashed'
+            ax.plot(x, y_cv[i,f,:], color=color, linestyle=style, 
+                        linewidth=1, alpha=0.35 ) 
+        ax.set_ylabel(metric) ; ax.set_xlabel('Lead time [days]')
+        ax.grid(b=True, which='major')
+        ax.set_title('{}-day mean'.format(col))
+        if min(x) == 1:
+            xmin = 0
+        else:
+            xmin = min(x)
+        xticks = np.arange(xmin, max(x)+1E-9, 20) ; 
+        if min(x) == 1:
+            xticks[0] = 1
+        ax.set_xticks(xticks)
+        if metric == 'BSS':
+            y_major = [-0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6]
+            ax.set_yticks(y_major, minor=False)
+            ax.set_yticklabels(y_major)
+            ax.set_yticks(np.arange(-0.6,0.6+1E-9, 0.1), minor=True)
+            ax.hlines(y=0, xmin=min(x), xmax=max(x), linewidth=1)
+        elif metric == 'AUC':
+            ax.set_yticks(np.arange(0.5,1+1E-9, 0.1), minor=True)
+            ax.hlines(y=0.5, xmin=min(x), xmax=max(x), linewidth=1)
+        
+#    str_freq = str(x).replace(' ' ,'')  
+    #%%
+    return

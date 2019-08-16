@@ -381,7 +381,7 @@ def add_training_data(RV_ts_train, precursors_train, SCORE, lag_idx, ex):
             pthresholds = np.linspace(1, 9, 9, dtype=int)
             p_pred = []
             for p in pthresholds:	
-                p_pred.append(np.percentile(norm.squeeze(), p*10, axis=0))
+                p_pred.append(np.percentile(norm, p*10, axis=0))
             
         return model, p_pred
     
@@ -391,21 +391,9 @@ def add_training_data(RV_ts_train, precursors_train, SCORE, lag_idx, ex):
         X = pd.DataFrame(norm.values, columns=keys_train )
         X = add_constant(X)
         model_set = sm.Logit(y_true_train, X, disp=0)
-        try:
-            model = model_set.fit( disp=0, maxfun=35 )
-            prediction_train = model.predict(X)
-        except np.linalg.LinAlgError as err:
-            if 'Singular matrix' in str(err):
-                model = model_set.fit(method='bfgs', disp=0 )
-                prediction_train = model.predict(X)
-            else:
-                raise
-        except Exception as e:
-            print(e)
-            model = model_set.fit(method='bfgs', disp=0 )
-            prediction_train = model.predict(X)
+        model = model_set.fit( disp=0 )
         
-        
+        prediction_train = model.predict(X)
         
         pthresholds = np.linspace(1, 9, 9, dtype=int)
         p_pred = []
@@ -435,25 +423,23 @@ def add_test_data(RV_ts_test, precursor_test, SCORE, ex):
                              ex['max_break'], grouped=SCORE.grouped)
     y_true[y_true!=0] = 1
     events_train = SCORE.y_true_train[ex['n']][SCORE.y_true_train[ex['n']]!=0].size
-    y_prob_train_clim = np.repeat( events_train/SCORE.y_true_train[ex['n']].size, y_true.size )    
+    y_true_train_clim = np.repeat( events_train/SCORE.y_true_train[ex['n']].size, y_true.size )    
 
     SCORE.RV_test.loc[dates_test, 0]    = pd.Series(ts_RV.values.ravel(), 
                                            index=dates_test)
     SCORE.y_true_test.loc[dates_test, 0] = pd.Series(y_true, 
                                            index=dates_test)
-    SCORE.y_true_train_clim.loc[dates_test, 0] = pd.Series(y_prob_train_clim, 
+    SCORE.y_true_train_clim.loc[dates_test, 0] = pd.Series(y_true_train_clim, 
                                            index=dates_test)
     
-    def add_predict_m2(model, ts_test, clim):       
+    def add_predict_m2(model, ts_test):       
         '''making prediction for dates_test based upon model in 
         SCORE.model_2 '''
-        if model != None: # due to convergence problems
-            keys_test = model.params.keys()                    
-            X_pred = pd.DataFrame(ts_test.values, columns=keys_test[1:])
-            X_pred = add_constant(X_pred)
-            prediction = SCORE.model_2[ex['n']][l].predict(X_pred).values
-        else:
-            prediction = clim
+        
+        keys_test = model.params.keys()                    
+        X_pred = pd.DataFrame(ts_test.values, columns=keys_test[1:])
+        X_pred = add_constant(X_pred)
+        prediction = SCORE.model_2[ex['n']][l].predict(X_pred).values
         return prediction
   
     for l, lag in enumerate(ex['lags']):
@@ -465,15 +451,15 @@ def add_test_data(RV_ts_test, precursor_test, SCORE, ex):
         # add 'model' 1                    
         if norm.shape[1] > 1:   
             model = SCORE.model_2[ex['n']][l]
-            predmodel_1 = add_predict_m2(model, norm, y_prob_train_clim)
+            predmodel_1 = add_predict_m2(model, norm)
         else:
             # testing raw precusor
-            predmodel_1 = norm.squeeze().values
+            predmodel_1 = norm.values
             
       
         
         model = SCORE.model_2[ex['n']][l]
-        predmodel_2 = add_predict_m2(model, norm, y_prob_train_clim)
+        predmodel_2 = add_predict_m2(model, norm)
         
         
         if SCORE.score_per_fold:
@@ -1005,9 +991,9 @@ def metrics_sklearn(y_true, y_pred, y_true_train_clim, alpha=0.05, n_boot=5, blo
 
 
 def get_logit_stat(SCORE, ex):
-    log_models = SCORE.model_2
-    pval = np.zeros( log_models.shape, dtype=list )
-    odds = np.zeros( log_models.shape, dtype=list )
+    log_models = SCORE.logitmodel
+    pval = np.zeros( log_models.shape )
+    odds = np.zeros( log_models.shape )
     for n in range(ex['n_conv']):
         
         for i, l in enumerate(ex['lags']):
@@ -1180,22 +1166,19 @@ def sig_bold_annot(corr, pvals):
     return np.array(corr_str)              
     
     #%%
-def add_scores_wrt_random(SCORE, n_shuffle=1000):
+def add_scores_to_class(SCORE, n_shuffle=1000):
     #%%
     y_true = SCORE.y_true_test
-    thresholds = [[(1-y_true[y_true.values==1.].size / y_true.size)]]
-    thresholds.append([t/100. for t in range(25, 100, 25)])
-#    thresholds = 
-    thresholds = flatten(thresholds)
+#    thresholds = [[(1-y_true[y_true.values==1.].size / y_true.size)]]
+#    thresholds.append([t/10. for t in range(2, 10, 2)])
+    thresholds = [t/100. for t in range(25, 100, 25)]
+#    thresholds = flatten(thresholds)
     
     
     list_dfs = []
     for lag in SCORE._lags:
         metric_names = ['Precision', 'Specifity', 'Recall', 'FPR', 'F1_score', 'Accuracy']
-        if n_shuffle == 0:
-            stats = ['fc']
-        else:
-            stats = ['fc', 'fc shuf', 'best shuf', 'impr.'] 
+        stats = ['fc', 'fc shuf', 'best shuf', 'impr.'] 
         stats_keys = stats * len(thresholds)
         thres_keys = np.repeat(thresholds, len(stats))
         data = np.zeros( (len(metric_names), len(stats_keys) ) )
@@ -1226,44 +1209,28 @@ def add_scores_wrt_random(SCORE, n_shuffle=1000):
                 Acc.append(metrics.accuracy_score(y_true, y_pred))
                 f1.append(metrics.f1_score(y_true, y_pred))
             
-            if n_shuffle > 0:
-                precision_  = [prec_f, np.mean(prec),
-                                          np.percentile(prec, 97.5), prec_f/np.mean(prec)]
-                recall_     = [recall_f, np.mean(recall),
-                                                  np.percentile(recall, 97.5),
-                                                     recall_f/np.mean(recall)]
-                FPR_        = [FPR_f, np.mean(FPR), np.percentile(FPR, 2.5),
-                                                     np.mean(FPR)/FPR_f]
-                specif_     = [SP_f, np.mean(SP), np.percentile(SP, 97.5), 
-                                                     SP_f/np.mean(SP)]
-                acc_        = [Acc_f, np.mean(Acc), np.percentile(Acc, 97.5), 
-                                                      Acc_f/np.mean(Acc)]
-                F1_         = [f1_f, np.mean(f1), np.percentile(f1, 97.5),
-                                                     f1_f/np.mean(f1)]
-            else:
-                precision_  = [prec_f]
-                recall_     = [recall_f]
-                FPR_        = [FPR_f]
-                specif_     = [SP_f]
-                acc_        = [Acc_f]
-                F1_         = [f1_f]
-            
-            df_lag.loc['Precision'][t] = pd.Series(precision_,
+            df_lag.loc['Precision'][t] = pd.Series([prec_f, np.mean(prec),
+                                          np.percentile(prec, 97.5), prec_f/np.mean(prec)],
                                             index=stats)
                                                      
     
-            df_lag.loc['Recall'][t]  = pd.Series(recall_,
+            df_lag.loc['Recall'][t]  = pd.Series([recall_f, np.mean(recall),
+                                                  np.percentile(recall, 97.5),
+                                                     recall_f/np.mean(recall)],
                                                     index=stats)
     #        cm = metrics.confusion_matrix(y_true,  y_pred_lags[l])
             tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred).ravel()
-            df_lag.loc['FPR'][t] = pd.Series(FPR_, index=stats)
+            df_lag.loc['FPR'][t] = pd.Series([FPR_f, np.mean(FPR), np.percentile(FPR, 2.5),
+                                                     np.mean(FPR)/FPR_f], index=stats)
                                                      
-            df_lag.loc['Specifity'][t] = pd.Series(specif_, index=stats)
-            df_lag.loc['Accuracy'][t] = pd.Series(acc_, index=stats)
-            df_lag.loc['F1_score'][t] = pd.Series(F1_, index=stats)
-
-        if n_shuffle > 0:
-            df_lag['mean_impr'] = df_lag.iloc[:, df_lag.columns.get_level_values(1)=='impr.'].mean(axis=1)
+            df_lag.loc['Specifity'][t] = pd.Series([SP_f, np.mean(SP), np.percentile(SP, 97.5), 
+                                                     SP_f/np.mean(SP)], index=stats)
+            df_lag.loc['Accuracy'][t] = pd.Series([Acc_f, np.mean(Acc), np.percentile(Acc, 97.5), 
+                                                      Acc_f/np.mean(Acc)], index=stats)
+            df_lag.loc['F1_score'][t] = pd.Series([f1_f, np.mean(f1), np.percentile(f1, 97.5),
+                                                     f1_f/np.mean(f1)], index=stats)
+        
+        df_lag['mean_impr'] = df_lag.iloc[:, df_lag.columns.get_level_values(1)=='impr.'].mean(axis=1)
 
         list_dfs.append(df_lag)
 
@@ -1271,10 +1238,8 @@ def add_scores_wrt_random(SCORE, n_shuffle=1000):
     #%%
 
     return df_sum
-
-
     
-def CV_wrapper(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA'], ext_ts=None):
+def CV_wrapper(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA']):
     #%%
     '''
     Function input:
@@ -1303,8 +1268,6 @@ def CV_wrapper(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA'], ext_ts=
     for n in range(len(ex['train_test_list'])):
         ex['n'] = n     
         
-        # reset keys:
-        keys = ex['pred_names'].copy()
         test  = ex['train_test_list'][n][1]
         RV_ts_test = test['RV']
         test_yrs = list(set(test['RV'].time.dt.year.values))
@@ -1329,36 +1292,26 @@ def CV_wrapper(RV_ts, ex, path_ts, lag_to_load=0, keys=['spatcov_CPPA'], ext_ts=
         dates_tfreq = func_CPPA.timeseries_tofit_bins(
                                 data.index, ex, ex['tfreq'], seldays='all', verb=0)
         data = data.loc[dates_tfreq]
-        data.index.name = 'time'
-        
-        def add_other_ts(data, ext_ts, ex):
-#            filenames = [f[0] for f in external_keys]
-            
-            for path_csv, cols in ext_ts:
                 
-                data_add = pd.read_csv(path_csv, index_col='time', infer_datetime_format=True)
-                data_add.index = pd.to_datetime(data_add.index)
+        def add_other_ts(filenames, ex):
+            
+            for path_csv in filenames:
+                data = pd.read_csv(path_csv, index_col='date', infer_datetime_format=True)
+                data.index = pd.to_datetime(data.index)
                 dates_tfreq = func_CPPA.timeseries_tofit_bins(
-                                        data_add.index, ex, ex['tfreq'], seldays='all', verb=0)
-                data_add = data_add.loc[dates_tfreq]
-                
-                for c in cols:
-                    data[c] = data_add[c]
-                    if c not in keys:
-                        keys.append(c)
-            return data, keys
+                                        data.index, ex, ex['tfreq'], seldays='all', verb=0)
+                data = data.loc[dates_tfreq]
+            return data
             
-        if ext_ts != None:
-            data, keys = add_other_ts(data, ext_ts, ex)
-            ex['pred_names'] = keys
-            
+        
+        
         def get_ts(data, SCORE, dates, keys, tfreq):           
-#            csv_train_test_data = 'testyr{}_{}.csv'.format(test_yrs, lag_to_load)
-#            path = os.path.join(path_ts, csv_train_test_data)
-#            data = pd.read_csv(path, index_col='date')
+            csv_train_test_data = 'testyr{}_{}.csv'.format(test_yrs, lag_to_load)
+            path = os.path.join(path_ts, csv_train_test_data)
+            data = pd.read_csv(path, index_col='date')
 
             data.index = pd.to_datetime(data.index)
-            xarray = data.to_xarray().to_array().rename({'time':'time'})
+            xarray = data.to_xarray().to_array().rename({'date':'time'})
             # check if ts in csv
             keys_ = [k for k in keys if k in data.columns]
             

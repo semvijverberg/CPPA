@@ -171,7 +171,7 @@ if ex['store_timeseries'] == True:
                      'l_ds_CPPA' : l_ds_CPPA} )
     np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
     path_ts = ex['output_ts_folder']
-    SCORE, ex = ROC_score.spatial_cov(RV_ts, ex, path_ts, lag_to_load=ex['lags'], keys=['spatcov_CPPA'])
+    SCORE, ex = ROC_score.CV_wrapper(RV_ts, ex, path_ts, lag_to_load=ex['lags'], keys=['spatcov_CPPA'])
 
 
 #%% 
@@ -288,13 +288,43 @@ ROC_score.create_validation_plot([output_dic_folder], metric='brier', getPEP=Fal
 path_ts = ex['output_ts_folder']
 ex['n_boot'] = 1000
 lag_to_load = 0
-lags_to_test = [0, 20] #np.arange(0, 15+1E-9,1, dtype=int)
-ex['event_percentile'] = 50 # 50 'std'
-#frequencies = np.array(np.arange(0, 140., 2.5),dtype=int) ; frequencies[0]=int(1)
+#np.arange(0, 15+1E-9,1, dtype=int)
+
+
+ex['event_percentile'] = 66 # 50 'std'
+# =============================================================================
+# Experiment diff tfreq
+# =============================================================================
+##frequencies = np.array(np.arange(0, 140., 2.5),dtype=int) ; frequencies[0]=int(1)
 #frequencies = np.array(np.arange(0, 90., 2.5),dtype=int) ; frequencies[0]=int(1)
-
+#frequencies = frequencies[~np.logical_and(frequencies>=65, frequencies <70)]
+#lags_to_test = [0, 1] 
+# =============================================================================
+# Experiment best tfreq
+# =============================================================================
 frequencies = [1]
+lags_to_test = np.arange(0,100/frequencies[0],max(1,int(5/frequencies[0])))
 
+#keys = ['spatcov_CPPA'] ; ext_ts = None
+#keys = ['spatcov_CPPA', '2', '3','4'] ; ext_ts = None
+
+keys = ['spatcov_CPPA', '2', '3','4'] 
+ext_ts = [tuple( [os.path.join(ex['output_ts_folder'], 'sm.csv'), tuple(['sm_rm20']) ] )]
+
+'''     for ERA5 [2,3,4,5,6,7]
+        East-Pac = 3
+        CARIBEAN = 6
+        MONSOON = 5
+        LAKES = 2
+        ICELAND = 7
+        Mid-Pac = 4 
+        '''
+        
+if keys != ['spatcov_CPPA']:
+    output_dic_folder = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/different_keys/' 
+    if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
+else:
+    output_dic_folder = ex['output_dic_folder']
 
 scores_ = ['BSS', 'BSS_low', 'BSS_high', 'AUC', 'AUC_low', 'AUC_high']
 data=np.zeros( (len(frequencies), len(lags_to_test), len(scores_)), 
@@ -305,7 +335,8 @@ for i, t in enumerate(frequencies):
     print('tfreq:', t)
     ex['tfreq'] = int(t)
     ex['lags'] = [l*t for l in lags_to_test]
-    SCORE, ex = ROC_score.spatial_cov(RV_ts, ex, path_ts, lag_to_load=lag_to_load, keys=['spatcov_CPPA'])
+    SCORE, ex = ROC_score.CV_wrapper(RV_ts, ex, path_ts, lag_to_load=lag_to_load, 
+                                     keys=keys, ext_ts=ext_ts)
     dict_tfreq[t] = SCORE
     summary[i,:,0] = np.array(SCORE.brier_logit.loc['BSS'])
     summary[i,:,1] = np.array(SCORE.brier_logit.loc['BSS_high'])
@@ -319,9 +350,10 @@ for i, t in enumerate(frequencies):
 #    summary[i,:,9] = np.array(SCORE.other_metrics.loc['f1_score']) # 2 * PREC * REC / (PREC + REC)
 #    summary[i,:,10] = np.array(SCORE.other_metrics.loc['Accuracy']) # correct pred / all preds
 
-
-filename_3 = 'list_tfreqs_{}_{}_lag{}_trh{}_nb{}'.format(frequencies[0], frequencies[-1],
-                          lags_to_test, ex['event_percentile'], ex['n_boot']).replace(' ','')
+precursors = '_'.join(ex['pred_names'])
+filename_3 = 'list_tfreqs_{}_{}_lag{:.0f}-{:.0f}_trh{}_nb{}_{}'.format(frequencies[0], frequencies[-1],
+                          lags_to_test[0],lags_to_test[-1], 
+                          ex['event_percentile'], ex['n_boot'], precursors)
 to_dict = dict( { 'dict_tfreq'      :   dict_tfreq,
                      'ex' : ex } )
 np.save(os.path.join(output_dic_folder, filename_3+'.npy'), to_dict) 
@@ -330,9 +362,14 @@ np.save(os.path.join(output_dic_folder, filename_3+'.npy'), to_dict)
 
 #%%
 #filename_3 = 'list_tfreqs_1_1_lag[051015202530354045505560657075]_trh50_nb1000'
+#filename_3 = 'list_tfreqs_10_10_lag[0.1.2.3.4.5.6.7.8.9.]_trh66_nb1000'
 
 to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
 dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
+frequencies = list(dict_tfreq.keys())
+precursors = '_'.join(ex['pred_names'])
+
+#%%
 
 metric = 'BSS'
 x = list(dict_tfreq.keys())
@@ -356,10 +393,14 @@ plt.show()
 #%%
 metric = 'BSS'
 x = list(dict_tfreq.keys())
+SCORE = dict_tfreq[frequencies[-1]]
+lags_to_test = np.array(SCORE._lags, dtype=int) / SCORE.tfreq
+precursors = '_'.join(ex['pred_names'])
 ROC_score.plot_score_lags(dict_tfreq, 'BSS', lags_to_test)
 lags_str = str(lags_to_test).replace(' ' ,'')        
-f_name = 'aftertrfeq_{}_lag{}_tf{}-{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
-          lags_str, ex['event_percentile'], ex['n_boot'])
+f_name = '{}_lag{:.0f}-{:.0f}_tf{}_thr{}_nb{}_{}.png'.format(metric, SCORE._lags[0], 
+          SCORE._lags[-1], SCORE.tfreq,
+          ex['event_percentile'], ex['n_boot'], precursors)
 filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
 plt.savefig(filename, dpi=600, bbox_inches='tight')
 plt.show()
@@ -368,8 +409,9 @@ metric = 'AUC'
 x = list(dict_tfreq.keys())
 ROC_score.plot_score_lags(dict_tfreq, 'AUC', lags_to_test)
 lags_str = str(lags_to_test).replace(' ' ,'')        
-f_name = '{}_lag{}_tf{}-{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
-          lags_str, ex['event_percentile'], ex['n_boot'])
+f_name = '{}_lag{:.0f}-{:.0f}_tf{}_thr{}_nb{}_{}.png'.format(metric, SCORE._lags[0], 
+          SCORE._lags[-1], SCORE.tfreq,
+          ex['event_percentile'], ex['n_boot'], precursors)
 filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
 plt.savefig(filename, dpi=600, bbox_inches='tight')
 plt.show()
@@ -377,12 +419,15 @@ plt.show()
 #%%
 to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
 dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
-freq = 1
+f = frequencies[-1]
+n_shuffle = 0
 #summary.loc[freq][0].to_dataframe('Summary')
-SCORE = dict_tfreq[freq]
-df_sum = ROC_score.add_scores_to_class(SCORE)
-fname = 'Valid_tf{}_L{}_th{}'.format(SCORE.tfreq, lags_to_test, ex['event_percentile']).replace(' ', '')
-df_sum.to_excel(os.path.join(output_dic_folder, fname+ '.xlsx'))
+SCORE = dict_tfreq[f]
+df_sum = ROC_score.add_scores_wrt_random(SCORE, n_shuffle=n_shuffle)
+f_name = '{}_lag{:.0f}-{:.0f}_tf{}_thr{}_ns{}_{}.png'.format('valid', SCORE._lags[0], 
+          SCORE._lags[-1], SCORE.tfreq,
+          ex['event_percentile'], n_shuffle, precursors)
+df_sum.to_excel(os.path.join(output_dic_folder, f_name+ '.xlsx'))
 
 #probs_forecast 
 lag = 50
@@ -395,7 +440,6 @@ RVaggr = 'RVfullts95'
 EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 era5T95   = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
 erai      = f'/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_{RVaggr}_rng50_2019-07-04/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-
 
 
 ## same mask Bram
@@ -420,9 +464,12 @@ if 'score' in ex.keys():
     SCORE = ex['score']
 
 #%% Reliability curve
+f = frequencies[-1]
+SCORE = dict_tfreq[f]
 from sklearn.calibration import calibration_curve
-#lags_to_plot = [1]
-lags_to_plot = [10] #[int(l*frequencies[-1]) for l in lags_to_test[2::4]]
+#lags_to_plot = [0,12,48, 72]
+lags_to_plot = [0, 20, 40,60] 
+#lags_to_plot = [int(l*f) for l in lags_to_test[0::4]]#[int(l*frequencies[-1]) for l in lags_to_test[2::4]]
 strategy = 'uniform' # 'quantile' or 'uniform'
 n_bins = 10
 ax = plt.subplot(111, facecolor='white')
@@ -487,12 +534,15 @@ for lag in lags_to_plot:
     plt.ylabel('Fraction of Positives')
     plt.xlabel('Mean Predicted Value')
     plt.legend(loc='upper left', fontsize='medium')
-f_name = 'calibration_curve_tf{}_lag{}_{}_thr{}.png'.format(SCORE.tfreq,
-                            str(lags_to_plot).replace(' ',''),
-                            strategy, ex['event_percentile'])
+    
+str_lags = str(lags_to_plot).replace(' ','').replace('[','').replace(']','')
+f_name = 'rel_curve_tf{}_lag{}_{}_thr{}_{}.png'.format(SCORE.tfreq,
+                            str_lags, strategy,
+                            ex['event_percentile'], precursors)
 filename = os.path.join(output_dic_folder, 'validation', f_name)
 plt.savefig(filename, dpi=600, bbox_inches='tight')
-plt.show() ; plt.close()
+plt.show() ; 
+plt.close()
 #%%
 RVaggr = 'RVfullts95'
 EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'

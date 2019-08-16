@@ -33,7 +33,7 @@ def load_response_variable(ex):
 
     RVtsfull, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
     if ex['tfreq'] != 1:
-        RVtsfull, dates = func_CPPA.time_mean_bins(RVtsfull, ex)
+        RVtsfull, dates = func_CPPA.time_mean_bins(RVtsfull, ex, ex['tfreq'])
     
     RVhour   = RVtsfull.time[0].dt.hour.values
     dates_all = pd.to_datetime(RVtsfull.time.values)

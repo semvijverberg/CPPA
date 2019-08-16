@@ -86,7 +86,7 @@ class SCORE_CLASS():
         self.RV_train           = np.zeros( shape_train_RV )
         self.y_true_train       = np.zeros( shape_train_RV )
         shape_train             = (self._n_conv, len(ex['lags']), trainsize ) 
-        self.Prec_train         = np.zeros( shape_train )
+        self.Prec_train         = np.zeros( shape_train, dtype=list )
 
         
         self.AUC  = pd.DataFrame(data=np.zeros( shape )*np.nan, 
@@ -101,14 +101,19 @@ class SCORE_CLASS():
         
         self.RV_thresholds      = np.zeros( (self._n_conv) )
         shape_stat = (self._n_conv, len(ex['lags']) )
-        self.logitmodel         = np.empty( shape_stat, dtype=list ) 
-        self.Prec_train_mean    = np.zeros( shape_stat )
-        self.Prec_train_std     = np.zeros( shape_stat )
+        self.model_1            = np.empty( shape_stat, dtype=list ) 
+        self.model_2            = np.empty( shape_stat, dtype=list ) 
+        self.Prec_train_mean    = np.zeros( shape_stat, dtype=list ) 
+        self.Prec_train_std     = np.zeros( shape_stat, dtype=list ) 
         self.predmodel_1_mean     = np.zeros( shape_stat )
         self.predmodel_1_std      = np.zeros( shape_stat )
         pthresholds             = np.linspace(1, 9, 9, dtype=int)
         data = np.empty( (shape_stat[0], shape_stat[1], pthresholds.size)  )
-        self.xrpercentiles = xr.DataArray(data=data, 
+        self.xrperc_m1 = xr.DataArray(data=data, 
+                                          coords=[range(shape_stat[0]), ex['lags'], pthresholds], 
+                                          dims=['n_tests', 'lag','percentile'], 
+                                          name='percentiles') 
+        self.xrperc_m2 = xr.DataArray(data=data, 
                                           coords=[range(shape_stat[0]), ex['lags'], pthresholds], 
                                           dims=['n_tests', 'lag','percentile'], 
                                           name='percentiles') 

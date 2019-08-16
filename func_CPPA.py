@@ -1620,7 +1620,7 @@ def time_mean_bins(xarray, ex, to_freq=int, verb=0):
                   ' frequency fits in one year')
         datetime = pd.to_datetime(np.array(xarray['time'].values, 
                                            dtype='datetime64[D]'))
-        datetime = timeseries_tofit_bins(datetime, ex, seldays='all', verb=0)
+        datetime = timeseries_tofit_bins(datetime, ex, to_freq, seldays='all', verb=0)
         xarray = xarray.sel(time=datetime)
         one_yr = datetime.where(datetime.year == datetime.year[0]).dropna(how='any')
           

@@ -911,8 +911,8 @@ def get_metrics_sklearn(SCORE, y_pred_all, alpha=0.05, n_boot=5):
     return df_auc, df_KSS, df_brier, metrics
 
 
-def get_KSS_clim(y_true, y_pred, threshold_clim_events):
-    fpr, tpr, thresholds = roc_curve(y_true, y_pred)
+def get_KSS_clim(y_true, y_pred_b, threshold_clim_events):
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred_b)
     idx_clim_events = np.argmin(abs(thresholds[::-1] - threshold_clim_events))
     KSS_score = tpr[idx_clim_events] - fpr[idx_clim_events]
     return KSS_score 

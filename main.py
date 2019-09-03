@@ -291,7 +291,7 @@ lag_to_load = 0
 #np.arange(0, 15+1E-9,1, dtype=int)
 
 
-ex['event_percentile'] = 66 # 50 'std'
+ex['event_percentile'] = 'std' # 50 'std'
 # =============================================================================
 # Experiment diff tfreq
 # =============================================================================
@@ -308,7 +308,7 @@ lags_to_test = np.arange(0,100/frequencies[0],max(1,int(5/frequencies[0])))
 #keys = ['spatcov_CPPA'] ; ext_ts = None
 #keys = ['spatcov_CPPA', '2', '3','4'] ; ext_ts = None
 
-keys = ['spatcov_CPPA', '2', '3','4'] 
+keys = ['spatcov_CPPA'] 
 ext_ts = [tuple( [os.path.join(ex['output_ts_folder'], 'sm.csv'), tuple(['sm_rm20']) ] )]
 
 '''     for ERA5 [2,3,4,5,6,7]
@@ -361,8 +361,6 @@ np.save(os.path.join(output_dic_folder, filename_3+'.npy'), to_dict)
 
 
 #%%
-#filename_3 = 'list_tfreqs_1_1_lag[051015202530354045505560657075]_trh50_nb1000'
-#filename_3 = 'list_tfreqs_10_10_lag[0.1.2.3.4.5.6.7.8.9.]_trh66_nb1000'
 
 to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
 dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
@@ -424,7 +422,7 @@ n_shuffle = 0
 #summary.loc[freq][0].to_dataframe('Summary')
 SCORE = dict_tfreq[f]
 df_sum = ROC_score.add_scores_wrt_random(SCORE, n_shuffle=n_shuffle)
-f_name = '{}_lag{:.0f}-{:.0f}_tf{}_thr{}_ns{}_{}.png'.format('valid', SCORE._lags[0], 
+f_name = '{}_lag{:.0f}-{:.0f}_tf{}_thr{}_ns{}_{}'.format('valid', SCORE._lags[0], 
           SCORE._lags[-1], SCORE.tfreq,
           ex['event_percentile'], n_shuffle, precursors)
 df_sum.to_excel(os.path.join(output_dic_folder, f_name+ '.xlsx'))

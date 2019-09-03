@@ -172,6 +172,27 @@ def load_precursor(ex):
     #%%
     return Prec_reg, ex
 
+class RV_class:
+    def __init__(self, RV_ts, RVfullts, kwrgs_events=None):
+        self.RV_ts = RV_ts 
+        self.RVfullts = df_data[df_data.columns[0]][0]
+        if kwrgs_events != None:
+            self.threshold = Ev_threshold(self.RV_ts, 
+                                              kwrgs_events['event_percentile'])
+            self.RV_b_full = Ev_timeseries(self.RVfullts, 
+                               threshold=self.threshold , 
+                               min_dur=kwrgs_events['min_dur'],
+                               max_break=kwrgs_events['max_break'], 
+                               grouped=kwrgs_events['grouped'])[0]
+            self.RV_bin   = self.RV_b_full[df_data['RV_mask'][0]] 
+            self.prob_clim = get_obs_clim(self)
+        self.dates_all = self.RV_b_full.index
+        self.dates_RV = self.RV_bin.index
+        self.TrainIsTrue = df_data['TrainIsTrue']
+        self.RV_mask = df_data['RV_mask']
+        self.freq      = get_freq_years(self)
+        self.n_oneRVyr = self.dates_RV[self.dates_RV.year == self.dates_RV.year[0]].size
+
 def load_data(ex):
     RVtsfull, RV_ts, ex = load_response_variable(ex)
     Prec_reg, ex = load_precursor(ex)

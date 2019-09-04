@@ -45,7 +45,7 @@ def __init__():
          'name'         :       'sst',
          'add_lsm'      :       False,
          'region'       :       'Northern',
-         'lags'         :       [0, 50], #[0, 10, 20, 35, 50, 65]
+         'lags'         :       [0, 10, 20, 35, 50, 65], #[0, 10, 20, 35, 50, 65]
          'plot_ts'      :       True,
          'exclude_yrs'  :       [],
          'verbosity'    :       1,

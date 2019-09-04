@@ -10,6 +10,8 @@ import xarray as xr
 import pandas as pd
 import numpy as np
 import func_CPPA
+import functions_RGCPD as rgcpd
+import functions_pp
 import func_fc
 from dateutil.relativedelta import relativedelta as date_dt
 flatten = lambda l: [item for sublist in l for item in sublist]
@@ -34,7 +36,7 @@ def load_response_variable(ex):
 
     RVfullts, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
     if ex['tfreq'] != 1:
-        RVfullts, dates = func_CPPA.time_mean_bins(RVfullts, ex, ex['tfreq'])
+        RVfullts, dates = functions_pp.time_mean_bins(RVfullts, ex, ex['tfreq'])
     
     RVhour   = RVfullts.time[0].dt.hour.values
     dates_all = pd.to_datetime(RVfullts.time.values)
@@ -112,46 +114,21 @@ def load_precursor(ex):
 #            dates_prec = subset_dates(datesRV, ex)
 #            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
 #    else:
-    varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, loadleap=True)
+    varfullgl = functions_pp.import_ds_timemeanbins(prec_filename, ex, 
+                                             loadleap=True, to_xarr=False)
+
     
     # =============================================================================
     # Ensure same longitude  
     # =============================================================================
     if varfullgl.longitude.min() < -175 and varfullgl.longitude.max() > 175:
-        varfullgl = func_CPPA.convert_longitude(varfullgl, 'only_east')
+        varfullgl = functions_pp.convert_longitude(varfullgl, 'only_east')
 
     # =============================================================================
     # Select a focus region  
     # =============================================================================
     Prec_reg = func_CPPA.find_region(varfullgl, region=ex['region'])[0]
     Prec_reg = Prec_reg.sel(time=dates_all)
-    
-    if ex['tfreq'] != 1:
-        Prec_reg, datesvar = func_CPPA.time_mean_bins(Prec_reg, ex)
-
-
-    ## filter out outliers 
-    if ex['name'][:2]=='sm':
-        Prec_reg = Prec_reg.where(Prec_reg.values < 5.*Prec_reg.std(dim='time').values)
-    
-    if ex['add_lsm'] == True:
-        filename = os.path.join(ex['path_mask'], ex['mask_file'])
-        mask = func_CPPA.import_array(filename, ex)
-                                    
-        if len(mask.shape) == 3:
-            mask = mask[0].squeeze()
-            
-        if 'latitude' and 'longitude' not in mask.dims:
-            mask = mask.rename({'lat':'latitude',
-                       'lon':'longitude'})
-    
-        mask_reg = func_CPPA.find_region(mask, region=ex['region'])[0]
-        mask_reg = mask_reg.squeeze()
-        mask_reg = np.array(mask_reg.values < 0.35, dtype=bool)
-
-        mask = (('latitude', 'longitude'), mask_reg)
-        Prec_reg.coords['mask'] = mask
-        Prec_reg = Prec_reg.where(mask_reg==True)
     
     
     

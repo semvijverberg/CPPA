@@ -21,6 +21,7 @@ import matplotlib.ticker as mticker
 import cartopy.mpl.ticker as cticker
 import datetime, calendar
 import functions_RGCPD as rgcpd
+import plot_maps
 import scipy 
 flatten = lambda l: [item for sublist in l for item in sublist]
 import functions_pp
@@ -124,15 +125,15 @@ def get_robust_precursors(precur_arr, RV, traintest, ex):
         #%%
         Comp_robust = np.ma.zeros( (len(lats) * len(lons), len(ex['lags'])) )
         
-        max_lag_dates = func_dates_min_lag(RV_dates_train, max(ex['lags']))[1]
+        max_lag_dates = rgcpd.func_dates_min_lag(RV_dates_train, max(ex['lags']))[1]
         dates_lags  = sorted(np.unique(np.concatenate([max_lag_dates, RV_dates_train])))
         dates_lags  = pd.to_datetime(dates_lags)
         std_train_lag = Prec_reg.sel(time=dates_lags).std(dim='time', skipna=True)
         
         for idx, lag in enumerate(ex['lags']):
             
-            events_min_lag = func_dates_min_lag(events, lag)[1]
-            dates_train_min_lag = func_dates_min_lag(RV_dates_train, lag)[1]
+            events_min_lag = rgcpd.func_dates_min_lag(events, lag)[1]
+            dates_train_min_lag = rgcpd.func_dates_min_lag(RV_dates_train, lag)[1]
         #        std_train_min_lag[idx] = Prec_reg.sel(time=dates_train_min_lag).std(dim='time', skipna=True)
         #        std_train_lag = std_train_min_lag[idx]
             
@@ -1546,107 +1547,57 @@ def create_chunks(all_yrs_set, n_out, chunks):
 #        dates_lag = dates_lag[mask_matching]
 #    return dates_lag
 #
-#def time_mean_bins(xarray, ex, to_freq=int, verb=0):
-#    #%%
-#    datetime = pd.to_datetime(xarray['time'].values)
-#     # ensure to remove leapdays
-#    datetime = remove_leapdays(datetime)
-#    xarray = xarray.sel(time=datetime)
-#    one_yr = datetime.where(datetime.year == datetime.year[0]).dropna(how='any')
-#    
-#    if one_yr.size % to_freq != 0:
-#        possible = []
-#        for i in np.arange(1,20):
-#            if one_yr.size%i == 0:
-#                possible.append(i)
-#        if verb == 1:
-#            print('Note: stepsize {} does not fit in one year\n '
-#                             ' supply an integer that fits {}'.format(
-#                                 to_freq, one_yr.size))   
-#            print('\n Stepsize that do fit are {}'.format(possible))
-#            print('\n Will shorten the \'subyear\', so that the temporal'
-#                  ' frequency fits in one year')
-#        datetime = pd.to_datetime(np.array(xarray['time'].values, 
-#                                           dtype='datetime64[D]'))
-#        datetime = timeseries_tofit_bins(datetime, ex, to_freq, seldays='all', verb=0)
-#        xarray = xarray.sel(time=datetime)
-#        one_yr = datetime.where(datetime.year == datetime.year[0]).dropna(how='any')
-#          
-#    else:
-#        pass
-#    fit_steps_yr = (one_yr.size )  / to_freq
-#    bins = list(np.repeat(np.arange(0, fit_steps_yr), to_freq))
-#    n_years = np.unique(datetime.year).size
-#    for y in np.arange(1, n_years):
-#        x = np.repeat(np.arange(0, fit_steps_yr), to_freq)
-#        x = x + fit_steps_yr * y
-#        [bins.append(i) for i in x]
-#    label_bins = xr.DataArray(bins, [xarray.coords['time'][:]], name='time')
-#    label_dates = xr.DataArray(xarray.time.values, [xarray.coords['time'][:]], name='time')
-#    xarray['bins'] = label_bins
-#    xarray['time_dates'] = label_dates
-#    xarray = xarray.set_index(time=['bins','time_dates'])
-#    
-#    half_step = to_freq/2.
-#    newidx = np.arange(half_step, datetime.size, to_freq, dtype=int)
-#    newdate = label_dates[newidx]
-#    
-#
-#    group_bins = xarray.groupby('bins').mean(dim='time', keep_attrs=True)
-#    group_bins['bins'] = newdate.values
-#    dates = pd.to_datetime(newdate.values)
-#    #%%
-#    return group_bins.rename({'bins' : 'time'}), dates
+
 #
 #
-#def make_datestr(dates, ex, startyr, endyr, lpyr=False):
-#    
-#    sstartdate = str(startyr) + '-' + ex['startperiod']
-#    senddate   = str(startyr) + '-' + ex['endperiod']
-#    
-#    # Find nearest matching date from dates (available)
-#    idx_start = abs(dates - pd.to_datetime(sstartdate)).argmin()
-#    sstartdate = dates[idx_start]
-#    idx_end   = abs(dates - pd.to_datetime(senddate)).argmin()
-#    senddate = dates[idx_end]
-#    
-#    start_yr = pd.date_range(start=sstartdate, end=senddate, 
-#                                freq=(dates[1] - dates[0]))
-#    if lpyr==True and calendar.isleap(startyr):
-#        start_yr -= pd.Timedelta( '1 days')
-#    else:
-#        pass
-#    breakyr = endyr
-#    datesstr = [str(date).split('.', 1)[0] for date in start_yr.values]
-#    nyears = (endyr - startyr)+1
-#    startday = start_yr[0].strftime('%Y-%m-%dT%H:%M:%S')
-#    endday = start_yr[-1].strftime('%Y-%m-%dT%H:%M:%S')
-#    firstyear = startday[:4]
-#    def plusyearnoleap(curr_yr, startday, endday, incr):
-#        startday = startday.replace(firstyear, str(curr_yr+incr))
-#        endday = endday.replace(firstyear, str(curr_yr+incr))
-#        
-#        next_yr = pd.date_range(start=startday, end=endday, 
-#                        freq=(dates[1] - dates[0]))
-#        if lpyr==True and calendar.isleap(curr_yr+incr):
-#            next_yr -= pd.Timedelta( '1 days')
-#        elif lpyr == False:
-#            # excluding leap year again
-#            noleapdays = (((next_yr.month==2) & (next_yr.day==29))==False)
-#            next_yr = next_yr[noleapdays].dropna(how='all')
-#        return next_yr
-#    
-#
-#    for yr in range(0,nyears):
-#        curr_yr = yr+startyr
-#        next_yr = plusyearnoleap(curr_yr, startday, endday, 1)
-#        nextstr = [str(date).split('.', 1)[0] for date in next_yr.values]
-#        datesstr = datesstr + nextstr
-#
-#        if next_yr.year[0] == breakyr:
-#            break
-#    dates_period = pd.to_datetime(datesstr)
-#    return dates_period
+def make_datestr(dates, ex, startyr, endyr, lpyr=False):
+    
+    sstartdate = str(startyr) + '-' + ex['startperiod']
+    senddate   = str(startyr) + '-' + ex['endperiod']
+    
+    # Find nearest matching date from dates (available)
+    idx_start = abs(dates - pd.to_datetime(sstartdate)).argmin()
+    sstartdate = dates[idx_start]
+    idx_end   = abs(dates - pd.to_datetime(senddate)).argmin()
+    senddate = dates[idx_end]
+    
+    start_yr = pd.date_range(start=sstartdate, end=senddate, 
+                                freq=(dates[1] - dates[0]))
+    if lpyr==True and calendar.isleap(startyr):
+        start_yr -= pd.Timedelta( '1 days')
+    else:
+        pass
+    breakyr = endyr
+    datesstr = [str(date).split('.', 1)[0] for date in start_yr.values]
+    nyears = (endyr - startyr)+1
+    startday = start_yr[0].strftime('%Y-%m-%dT%H:%M:%S')
+    endday = start_yr[-1].strftime('%Y-%m-%dT%H:%M:%S')
+    firstyear = startday[:4]
+    def plusyearnoleap(curr_yr, startday, endday, incr):
+        startday = startday.replace(firstyear, str(curr_yr+incr))
+        endday = endday.replace(firstyear, str(curr_yr+incr))
+        
+        next_yr = pd.date_range(start=startday, end=endday, 
+                        freq=(dates[1] - dates[0]))
+        if lpyr==True and calendar.isleap(curr_yr+incr):
+            next_yr -= pd.Timedelta( '1 days')
+        elif lpyr == False:
+            # excluding leap year again
+            noleapdays = (((next_yr.month==2) & (next_yr.day==29))==False)
+            next_yr = next_yr[noleapdays].dropna(how='all')
+        return next_yr
+    
+
+    for yr in range(0,nyears):
+        curr_yr = yr+startyr
+        next_yr = plusyearnoleap(curr_yr, startday, endday, 1)
+        nextstr = [str(date).split('.', 1)[0] for date in next_yr.values]
+        datesstr = datesstr + nextstr
+
+        if next_yr.year[0] == breakyr:
+            break
+    dates_period = pd.to_datetime(datesstr)
+    return dates_period
 #
 #def import_array(filename, ex):
 #    
@@ -1862,78 +1813,78 @@ def create_chunks(all_yrs_set, n_out, chunks):
 #    return xr_rolling_mean
 #
 #
-#def find_region(data, region='Pacific_US'):
-#    if region == 'Pacific_US':
-#        west_lon = -240; east_lon = -40; south_lat = -10; north_lat = 80
-#
-#    elif region ==  'U.S.soil':
-#        west_lon = -130; east_lon = -60; south_lat = 0; north_lat = 60
-#    elif region ==  'U.S.cluster':
-#        west_lon = -100; east_lon = -70; south_lat = 20; north_lat = 50
-#    elif region ==  'Pacific':
-#        west_lon = -215; east_lon = -120; south_lat = 19; north_lat = 60
-#    elif region ==  'global':
-#        west_lon = -360; east_lon = -0.1; south_lat = -80; north_lat = 80
-#    elif region ==  'Northern':
-#        west_lon = -360; east_lon = -0.1; south_lat = -10; north_lat = 80
-#    elif region ==  'Southern':
-#        west_lon = -360; east_lon = -0.1; south_lat = -80; north_lat = -10
-#    elif region ==  'Tropics':
-#        west_lon = -360; east_lon = -0.1; south_lat = -15; north_lat = 30 
-#    elif region ==  'elnino3.4':
-#        west_lon = -170; east_lon = -120; south_lat = -5; north_lat = 5 
-#    elif region ==  'PEPrectangle':
-#        west_lon = -215; east_lon = -130; south_lat = 20; north_lat = 50
-#    elif region ==  'PDO':
-#        west_lon = -250; east_lon = -110; south_lat = 20; north_lat = 70
-##    elif region == 'for_soil':
-#        
-#
-#    region_coords = [west_lon, east_lon, south_lat, north_lat]
-#    import numpy as np
-#    def find_nearest(array, value):
-#        idx = (np.abs(array - value)).argmin()
-#        return int(idx)
-##    if data.longitude.values[-1] > 180:
-##        all_values = data.sel(latitude=slice(north_lat, south_lat), longitude=slice(360+west_lon, 360+east_lon))
-##        lon_idx = np.arange(find_nearest(data['longitude'], 360 + west_lon), find_nearest(data['longitude'], 360+east_lon))
-##        lat_idx = np.arange(find_nearest(data['latitude'],north_lat),find_nearest(data['latitude'],south_lat),1)
-#        
-#    if west_lon <0 and east_lon > 0:
-#        # left_of_meridional = np.array(data.sel(latitude=slice(north_lat, south_lat), longitude=slice(0, east_lon)))
-#        # right_of_meridional = np.array(data.sel(latitude=slice(north_lat, south_lat), longitude=slice(360+west_lon, 360)))
-#        # all_values = np.concatenate((np.reshape(left_of_meridional, (np.size(left_of_meridional))), np.reshape(right_of_meridional, np.size(right_of_meridional))))
-#        lon_idx = np.concatenate(( np.arange(find_nearest(data['longitude'], 360 + west_lon), len(data['longitude'])),
-#                              np.arange(0,find_nearest(data['longitude'], east_lon), 1) ))
-#        
-#        north_idx = find_nearest(data['latitude'],north_lat)
-#        south_idx = find_nearest(data['latitude'],south_lat)
-#        if north_idx > south_idx:
-#            lat_idx = np.arange(south_idx,north_idx,1)
-#            all_values = data.sel(latitude=slice(south_lat, north_lat), 
-#                                  longitude=(data.longitude > 360 + west_lon) | (data.longitude < east_lon))
-#        elif south_idx > north_idx:
-#            lat_idx = np.arange(north_idx,south_idx,1)
-#            all_values = data.sel(latitude=slice(north_lat, south_lat), 
-#                                  longitude=(data.longitude > 360 + west_lon) | (data.longitude < east_lon))
-#    if west_lon < 0 and east_lon < 0:
+def find_region(data, region='Pacific_US'):
+    if region == 'Pacific_US':
+        west_lon = -240; east_lon = -40; south_lat = -10; north_lat = 80
+
+    elif region ==  'U.S.soil':
+        west_lon = -130; east_lon = -60; south_lat = 0; north_lat = 60
+    elif region ==  'U.S.cluster':
+        west_lon = -100; east_lon = -70; south_lat = 20; north_lat = 50
+    elif region ==  'Pacific':
+        west_lon = -215; east_lon = -120; south_lat = 19; north_lat = 60
+    elif region ==  'global':
+        west_lon = -360; east_lon = -0.1; south_lat = -80; north_lat = 80
+    elif region ==  'Northern':
+        west_lon = -360; east_lon = -0.1; south_lat = -10; north_lat = 80
+    elif region ==  'Southern':
+        west_lon = -360; east_lon = -0.1; south_lat = -80; north_lat = -10
+    elif region ==  'Tropics':
+        west_lon = -360; east_lon = -0.1; south_lat = -15; north_lat = 30 
+    elif region ==  'elnino3.4':
+        west_lon = -170; east_lon = -120; south_lat = -5; north_lat = 5 
+    elif region ==  'PEPrectangle':
+        west_lon = -215; east_lon = -130; south_lat = 20; north_lat = 50
+    elif region ==  'PDO':
+        west_lon = -250; east_lon = -110; south_lat = 20; north_lat = 70
+#    elif region == 'for_soil':
+        
+
+    region_coords = [west_lon, east_lon, south_lat, north_lat]
+    import numpy as np
+    def find_nearest(array, value):
+        idx = (np.abs(array - value)).argmin()
+        return int(idx)
+#    if data.longitude.values[-1] > 180:
+#        all_values = data.sel(latitude=slice(north_lat, south_lat), longitude=slice(360+west_lon, 360+east_lon))
 #        lon_idx = np.arange(find_nearest(data['longitude'], 360 + west_lon), find_nearest(data['longitude'], 360+east_lon))
-#        
-#        north_idx = find_nearest(data['latitude'],north_lat)
-#        south_idx = find_nearest(data['latitude'],south_lat)
-#        if north_idx > south_idx:
-#            lat_idx = np.arange(south_idx,north_idx,1)
-#            all_values = data.sel(latitude=slice(south_lat, north_lat), 
-#                                  longitude=slice(360+west_lon, 360+east_lon))
-#        elif south_idx > north_idx:
-#            lat_idx = np.arange(north_idx,south_idx,1)
-#            all_values = data.sel(latitude=slice(north_lat, south_lat), 
-#                                  longitude=slice(360+west_lon, 360+east_lon))     
-#        
-##        all_values = data.sel(latitude=slice(north_lat, south_lat), longitude=slice(360+west_lon, 360+east_lon))
-##        lat_idx = np.arange(find_nearest(data['latitude'],north_lat),find_nearest(data['latitude'],south_lat),1)
-#
-#    return all_values, region_coords
+#        lat_idx = np.arange(find_nearest(data['latitude'],north_lat),find_nearest(data['latitude'],south_lat),1)
+        
+    if west_lon <0 and east_lon > 0:
+        # left_of_meridional = np.array(data.sel(latitude=slice(north_lat, south_lat), longitude=slice(0, east_lon)))
+        # right_of_meridional = np.array(data.sel(latitude=slice(north_lat, south_lat), longitude=slice(360+west_lon, 360)))
+        # all_values = np.concatenate((np.reshape(left_of_meridional, (np.size(left_of_meridional))), np.reshape(right_of_meridional, np.size(right_of_meridional))))
+        lon_idx = np.concatenate(( np.arange(find_nearest(data['longitude'], 360 + west_lon), len(data['longitude'])),
+                              np.arange(0,find_nearest(data['longitude'], east_lon), 1) ))
+        
+        north_idx = find_nearest(data['latitude'],north_lat)
+        south_idx = find_nearest(data['latitude'],south_lat)
+        if north_idx > south_idx:
+            lat_idx = np.arange(south_idx,north_idx,1)
+            all_values = data.sel(latitude=slice(south_lat, north_lat), 
+                                  longitude=(data.longitude > 360 + west_lon) | (data.longitude < east_lon))
+        elif south_idx > north_idx:
+            lat_idx = np.arange(north_idx,south_idx,1)
+            all_values = data.sel(latitude=slice(north_lat, south_lat), 
+                                  longitude=(data.longitude > 360 + west_lon) | (data.longitude < east_lon))
+    if west_lon < 0 and east_lon < 0:
+        lon_idx = np.arange(find_nearest(data['longitude'], 360 + west_lon), find_nearest(data['longitude'], 360+east_lon))
+        
+        north_idx = find_nearest(data['latitude'],north_lat)
+        south_idx = find_nearest(data['latitude'],south_lat)
+        if north_idx > south_idx:
+            lat_idx = np.arange(south_idx,north_idx,1)
+            all_values = data.sel(latitude=slice(south_lat, north_lat), 
+                                  longitude=slice(360+west_lon, 360+east_lon))
+        elif south_idx > north_idx:
+            lat_idx = np.arange(north_idx,south_idx,1)
+            all_values = data.sel(latitude=slice(north_lat, south_lat), 
+                                  longitude=slice(360+west_lon, 360+east_lon))     
+        
+#        all_values = data.sel(latitude=slice(north_lat, south_lat), longitude=slice(360+west_lon, 360+east_lon))
+#        lat_idx = np.arange(find_nearest(data['latitude'],north_lat),find_nearest(data['latitude'],south_lat),1)
+
+    return all_values, region_coords
 #
 #
 #def cross_correlation_patterns(full_timeserie, pattern):
@@ -2292,128 +2243,127 @@ def create_chunks(all_yrs_set, n_out, chunks):
 #    #%%
 #    return projection, ax
 #
-#def xarray_plot(data, path='default', name = 'default', saving=False):
-#    #%%
-#    # from plotting import save_figure
-#    import matplotlib.pyplot as plt
-#    import cartopy.crs as ccrs
-#    import numpy as np
-#    if type(data) == type(xr.Dataset()):
-#        data = data.to_array().squeeze()
-#
-#    # some lon values > 180
-#    if len(data.longitude[np.where(data.longitude > 180)[0]]) != 0:
-#        # if 0 is in lon values
-#        if data.longitude.where(data.longitude==0).dropna(dim='longitude', how='all').size != 0.:
-#            print('hoi')   
-#            data = convert_longitude(data)
-#    else:
-#        pass
-#    
-#    # get lonlat labels
-#    def evenly_spaced(ticks, steps=[5, 6, 7, 4, 3, 4]):
-#        def myround(x, base=5):
-#            return np.array(base * np.round(x/base,0), dtype=int)
-#        size = []
-#        tmp  = []
-#        for s in steps:
-#            labels = np.linspace(np.min(ticks), np.max(ticks), s, dtype=int)
-#            labels = np.array(sorted(list(set(myround(labels, 5)))))
-#            tmp.append([labels[l]-labels[l+1] for l in range(s-1)])
-#            size.append(np.unique([labels[l]-labels[l+1] for l in range(s-1)]).size)
-#            if size[-1]==1:
-#                break
-#        return labels
-#
-#    longitude_labels = evenly_spaced(data.longitude.values)
-#    latitude_labels = evenly_spaced(data.latitude.values, steps=[4,3,5])
-#    
-#    
-#    if data.ndim != 2:
-#        print("number of dimension is {}, printing first element of first dimension".format(np.squeeze(data).ndim))
-#        data = data[0]
-#    else:
-#        pass
-#    if 'mask' in list(data.coords.keys()):
-#        lons = data.where(data.mask==True, drop=True).longitude
-#        lats = data.where(data.mask==True, drop=True).latitude
-#        cen_lon = int(lons.mean())
-#        data = data.where(data.mask==True, drop=True)
-#    else:
-#        lons = data.where(data.mask==True, drop=True).longitude
-#        lats = data.where(data.mask==True, drop=True).latitude
-#        cen_lon = (lons.mean())
-##    data = data.sortby(lons)
-#    
-#    
-#    fig = plt.figure( figsize=(15,11) ) 
-#    proj = ccrs.PlateCarree(central_longitude=cen_lon)
-#    ax = fig.add_subplot(111, projection=proj)
-#    ax.coastlines(color='black', alpha=0.3, facecolor='grey')
-#    ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
-##    ax.tick_params(axis='both', labelsize='small')
-##    ax.set_xlabel([str(el) for el in longitude_labels])
-#    if proj.proj4_params['proj'] in ['merc', 'eqc']:
-#        
-#        ax.set_xticks(longitude_labels[:], crs=ccrs.PlateCarree())
-#        ax.set_xticklabels(longitude_labels[:], fontsize=12)
-#        lon_formatter = cticker.LongitudeFormatter()
-#        ax.xaxis.set_major_formatter(lon_formatter)
-#        
-#        ax.set_yticks(latitude_labels, crs=ccrs.PlateCarree())
-#        ax.set_yticklabels(latitude_labels, fontsize=12)
-#        lat_formatter = cticker.LatitudeFormatter()
-#        ax.yaxis.set_major_formatter(lat_formatter)
-#        ax.grid(linewidth=1, color='black', alpha=0.3, linestyle='--')
-#    
-#    vmin = np.round(float(data.min())-0.01,decimals=2) 
-#    vmax = np.round(float(data.max())+0.01,decimals=2) 
-#    vmin = -max(abs(vmin),vmax) ; vmax = max(abs(vmin),vmax)
-#    ax.set_extent([lons[0],lons[-1], lats[0], lats[-1]], ccrs.PlateCarree())
-#
-#    data.attrs['long_name'] = ''
-#    if 'mask' in list(data.coords.keys()):
-#        for_plt = data.copy().where(data.mask==True)
-#        plot = for_plt.plot.pcolormesh('longitude', 'latitude', ax=ax, cmap=plt.cm.RdBu_r,
-#                             transform=ccrs.PlateCarree(), add_colorbar=True,
-#                             vmin=vmin, vmax=vmax, subplot_kws={'projection': proj},
-#                             cbar_kwargs={'orientation' : 'horizontal', 
-#                                          'fraction':0.10,
-#                                          'pad':0.05})
-#    else:
-#        plot = data.plot.pcolormesh(ax=ax, cmap=plt.cm.RdBu_r,
-#                             transform=ccrs.PlateCarree(), add_colorbar=True,
-#                             vmin=vmin, vmax=vmax, 
-#                             cbar_kwargs={'orientation' : 'horizontal'})
-#    plot.colorbar.ax.set_label('')
-#    ax.set_xlabel('')
-#    ax.set_ylabel('')
-#    
-#    #%%
-#    if saving == True:
-#        save_figure(fig, path=path, name=name)
-#    plt.show()
-#
-#def save_figure(fig, path, name=''):
-#    import datetime
-#    now = datetime.datetime.now().strftime('%y-%m-%d_%H:%M')
-#    if path == 'default':
-#        path = '/Users/semvijverberg/Downloads'
-#    else:
-#        path = path
-#    import datetime
-#    today = datetime.datetime.today().strftime("%d-%m-%y_%H'%M")
-#    if name == '':
-#        name = now
-#    if name != '':
-#        print('input name is: {}'.format(name))
-#        name = name + '.png'
-#        pass
-#    else:
-#        name = 'fig_' + today + '.png'
-#    print(('{} to path {}'.format(name, path)))
-#    fig.savefig(os.path.join(path,name), format='png', dpi=300, bbox_inches='tight')
-#    return fig
+def xarray_plot(data, path='default', name = 'default', saving=False):
+    #%%
+    # from plotting import save_figure
+    import matplotlib.pyplot as plt
+    import numpy as np
+    if type(data) == type(xr.Dataset()):
+        data = data.to_array().squeeze()
+
+    # some lon values > 180
+    if len(data.longitude[np.where(data.longitude > 180)[0]]) != 0:
+        # if 0 is in lon values
+        if data.longitude.where(data.longitude==0).dropna(dim='longitude', how='all').size != 0.:
+            print('hoi')   
+            data = functions_pp.convert_longitude(data, 'only_east') 
+    else:
+        pass
+    
+    # get lonlat labels
+    def evenly_spaced(ticks, steps=[5, 6, 7, 4, 3, 4]):
+        def myround(x, base=5):
+            return np.array(base * np.round(x/base,0), dtype=int)
+        size = []
+        tmp  = []
+        for s in steps:
+            labels = np.linspace(np.min(ticks), np.max(ticks), s, dtype=int)
+            labels = np.array(sorted(list(set(myround(labels, 5)))))
+            tmp.append([labels[l]-labels[l+1] for l in range(s-1)])
+            size.append(np.unique([labels[l]-labels[l+1] for l in range(s-1)]).size)
+            if size[-1]==1:
+                break
+        return labels
+
+    longitude_labels = evenly_spaced(data.longitude.values)
+    latitude_labels = evenly_spaced(data.latitude.values, steps=[4,3,5])
+    
+    
+    if data.ndim != 2:
+        print("number of dimension is {}, printing first element of first dimension".format(np.squeeze(data).ndim))
+        data = data[0]
+    else:
+        pass
+    if 'mask' in list(data.coords.keys()):
+        lons = data.where(data.mask==True, drop=True).longitude
+        lats = data.where(data.mask==True, drop=True).latitude
+        cen_lon = int(lons.mean())
+        data = data.where(data.mask==True, drop=True)
+    else:
+        lons = data.where(data.mask==True, drop=True).longitude
+        lats = data.where(data.mask==True, drop=True).latitude
+        cen_lon = (lons.mean())
+#    data = data.sortby(lons)
+    
+    
+    fig = plt.figure( figsize=(15,11) ) 
+    proj = ccrs.PlateCarree(central_longitude=cen_lon)
+    ax = fig.add_subplot(111, projection=proj)
+    ax.coastlines(color='black', alpha=0.3, facecolor='grey')
+    ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
+#    ax.tick_params(axis='both', labelsize='small')
+#    ax.set_xlabel([str(el) for el in longitude_labels])
+    if proj.proj4_params['proj'] in ['merc', 'eqc']:
+        
+        ax.set_xticks(longitude_labels[:], crs=ccrs.PlateCarree())
+        ax.set_xticklabels(longitude_labels[:], fontsize=12)
+        lon_formatter = cticker.LongitudeFormatter()
+        ax.xaxis.set_major_formatter(lon_formatter)
+        
+        ax.set_yticks(latitude_labels, crs=ccrs.PlateCarree())
+        ax.set_yticklabels(latitude_labels, fontsize=12)
+        lat_formatter = cticker.LatitudeFormatter()
+        ax.yaxis.set_major_formatter(lat_formatter)
+        ax.grid(linewidth=1, color='black', alpha=0.3, linestyle='--')
+    
+    vmin = np.round(float(data.min())-0.01,decimals=2) 
+    vmax = np.round(float(data.max())+0.01,decimals=2) 
+    vmin = -max(abs(vmin),vmax) ; vmax = max(abs(vmin),vmax)
+    ax.set_extent([lons[0],lons[-1], lats[0], lats[-1]], ccrs.PlateCarree())
+
+    data.attrs['long_name'] = ''
+    if 'mask' in list(data.coords.keys()):
+        for_plt = data.copy().where(data.mask==True)
+        plot = for_plt.plot.pcolormesh('longitude', 'latitude', ax=ax, cmap=plt.cm.RdBu_r,
+                             transform=ccrs.PlateCarree(), add_colorbar=True,
+                             vmin=vmin, vmax=vmax, subplot_kws={'projection': proj},
+                             cbar_kwargs={'orientation' : 'horizontal', 
+                                          'fraction':0.10,
+                                          'pad':0.05})
+    else:
+        plot = data.plot.pcolormesh(ax=ax, cmap=plt.cm.RdBu_r,
+                             transform=ccrs.PlateCarree(), add_colorbar=True,
+                             vmin=vmin, vmax=vmax, 
+                             cbar_kwargs={'orientation' : 'horizontal'})
+    plot.colorbar.ax.set_label('')
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    
+    #%%
+    if saving == True:
+        save_figure(fig, path=path, name=name)
+    plt.show()
+
+def save_figure(fig, path, name=''):
+
+    now = datetime.datetime.now().strftime('%y-%m-%d_%H:%M')
+    if path == 'default':
+        path = '/Users/semvijverberg/Downloads'
+    else:
+        path = path
+    import datetime
+    today = datetime.datetime.today().strftime("%d-%m-%y_%H'%M")
+    if name == '':
+        name = now
+    if name != '':
+        print('input name is: {}'.format(name))
+        name = name + '.png'
+        pass
+    else:
+        name = 'fig_' + today + '.png'
+    print(('{} to path {}'.format(name, path)))
+    fig.savefig(os.path.join(path,name), format='png', dpi=300, bbox_inches='tight')
+    return fig
 #
 #def plot_events_validation(pred1, pred2, obs, pt1, pt2, othreshold, test_year=None):
 #    #%%
@@ -2525,261 +2475,261 @@ def create_chunks(all_yrs_set, n_out, chunks):
 #        filename = os.path.join(folder, 'ts_{}'.format(test_year))
 #        plt.savefig(filename+'.png', dpi=300)
 #
-#def plotting_wrapper(plotarr, ex, filename=None,  kwrgs=None):
-##    map_proj = ccrs.Miller(central_longitude=240) 
-#    try:
-#        folder_name = os.path.join(ex['figpathbase'], ex['exp_folder'])
-#    except:
-#        folder_name = '/Users/semvijverberg/Downloads'
-#    if os.path.isdir(folder_name) != True : 
-#        os.makedirs(folder_name)
-#
-#    if kwrgs == None:
-#        kwrgs = dict( {'title' : plotarr.name, 'clevels' : 'notdefault', 'steps':17,
-#                        'vmin' : -3*plotarr.std().values, 'vmax' : 3*plotarr.std().values, 
-#                       'cmap' : plt.cm.RdBu_r, 'column' : 1, 'subtitles' : None,
-#                       'style_colormap' : 'pcolormesh'} )
-#    else:
-#        kwrgs = kwrgs
-#        if 'title' not in kwrgs.keys():
-#            kwrgs['title'] = plotarr.attrs['title']
-#        if 'style_colormap' not in kwrgs.keys():
-#            kwrgs['style_colormap'] = 'pcolormesh'
-#            
-#        
-#    if filename != None:
-#        file_name = os.path.join(folder_name, filename)
-#        kwrgs['savefig'] = True
-#    else:
-#        kwrgs['savefig'] = False
-#        file_name = 'Users/semvijverberg/Downloads/test.png'
-#    finalfigure(plotarr, file_name, kwrgs)
-#    
-#
-#def finalfigure(xrdata, file_name, kwrgs):
-#    #%%
-#    map_proj = ccrs.PlateCarree(central_longitude=220)  
-#    lons = xrdata.longitude.values
-#    lats = xrdata.latitude.values
-#    strvars = [' {} '.format(var) for var in list(xrdata.dims)]
-#    
-#    var = [var for var in strvars if var not in ' longitude latitude '][0] 
-#    var = var.replace(' ', '')
-#    g = xr.plot.FacetGrid(xrdata, col=var, col_wrap=kwrgs['column'], sharex=True,
-#                      sharey=True, subplot_kws={'projection': map_proj},
-#                      aspect= (xrdata.longitude.size) / xrdata.latitude.size, size=3.5)
-#    figwidth = g.fig.get_figwidth() ; figheight = g.fig.get_figheight()
-#
-#    lon_tick = xrdata.longitude.values
-#    dg = abs(lon_tick[1] - lon_tick[0])
-#    periodic = (np.arange(0, 360, dg).size - lon_tick.size) < 1
-#    
-#    longitude_labels = np.linspace(np.min(lon_tick), np.max(lon_tick), 6, dtype=int)
-#    longitude_labels = np.array(sorted(list(set(np.round(longitude_labels, -1)))))
-#
-##    longitude_labels = np.concatenate([ longitude_labels, [longitude_labels[-1]], [180]])
-##    longitude_labels = [-150,  -70,    0,   70,  140, 140]
-#    latitude_labels = np.linspace(xrdata.latitude.min(), xrdata.latitude.max(), 4, dtype=int)
-#    latitude_labels = sorted(list(set(np.round(latitude_labels, -1))))
-#    
-#    g.set_ticks(max_xticks=5, max_yticks=5, fontsize='small')
-#    g.set_xlabels(label=[str(el) for el in longitude_labels])
-#
-#    
-#    if kwrgs['clevels'] == 'default':
-#        vmin = np.round(float(xrdata.min())-0.01,decimals=2) ; vmax = np.round(float(xrdata.max())+0.01,decimals=2)
-#        clevels = np.linspace(-max(abs(vmin),vmax),max(abs(vmin),vmax),17) # choose uneven number for # steps
-#    else:
-#        vmin=kwrgs['vmin']
-#        vmax=kwrgs['vmax']
-#        
-#        clevels = np.linspace(vmin, vmax,kwrgs['steps'])
-#
-#    cmap_ = kwrgs['cmap']
-#    
-#    if 'clim' in kwrgs.keys(): #adjust the range of colors shown in cbar
-#        cnorm = np.linspace(kwrgs['clim'][0],kwrgs['clim'][1],11)
-#        vmin = kwrgs['clim'][0]
-#    else:
-#        cnorm = clevels
-#        
-#
-#    norm = mpl.colors.BoundaryNorm(boundaries=cnorm, ncolors=256)
-#    subplot_kws = {'projection': map_proj}
-#    
-#    n_plots = xrdata[var].size
-#    for n_ax in np.arange(0,n_plots):
-#        ax = g.axes.flatten()[n_ax]
-##        print(n_ax)
-#        if periodic == True:
-#            plotdata = extend_longitude(xrdata[n_ax]).squeeze().drop('ds')
-#        else:
-#            plotdata = xrdata[n_ax].squeeze()
-#        if kwrgs['style_colormap'] == 'pcolormesh':
-#            im = plotdata.plot.pcolormesh(ax=ax, cmap=cmap_,
-#                               transform=ccrs.PlateCarree(),
-#                               subplot_kws=subplot_kws,
-#                                levels=clevels, add_colorbar=False)
-#        
-#        if kwrgs['style_colormap'] == 'contourf':
-#            im = plotdata.plot.contourf(ax=ax, cmap=cmap_,
-#                               transform=ccrs.PlateCarree(),
-#                               subplot_kws=subplot_kws,
-#                                levels=clevels, add_colorbar=False)
-#
-#        if 'sign_stipling' in kwrgs.keys():
-#            if kwrgs['sign_stipling'][0] == 'colorplot':
-#                sigdata = kwrgs['sign_stipling'][1]
-#                if periodic == True:
-#                    sigdata = extend_longitude(sigdata[n_ax]).squeeze().drop('ds')
-#                else:
-#                    sigdata = sigdata[n_ax].squeeze()
-#                sigdata.plot.contourf(ax=ax, levels=[0, 0.5, 1],
-#                           transform=ccrs.PlateCarree(), hatches=['...', ''],
-#                           colors='none', add_colorbar=False,
-#                           subplot_kws={'projection': map_proj})
-#            
-#        ax.coastlines(color='black', alpha=0.3, facecolor='grey', linewidth=2)
-#        ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
-#        
-#        ax.set_extent([lons[0], lons[-1], lats[0], lats[-1]], ccrs.PlateCarree())
-#        
-#        if 'contours' in kwrgs.keys():
-#            condata, con_levels = kwrgs['contours']
-#            if periodic == True:
-#                condata = extend_longitude(condata[n_ax]).squeeze().drop('ds')
-#            else:
-#                condata = condata[n_ax].squeeze()
-#            condata.plot.contour(ax=ax, add_colorbar=False,
-#                               transform=ccrs.PlateCarree(),
-#                               subplot_kws={'projection': map_proj},
-#                                levels=con_levels, cmap=cmap_)
-#            if 'sign_stipling' in kwrgs.keys():
-#                if kwrgs['sign_stipling'][0] == 'contour':
-#                    sigdata = kwrgs['sign_stipling'][1]
-#                    if periodic == True:
-#                        sigdata = extend_longitude(sigdata[n_ax]).squeeze().drop('ds')
-#                    else:
-#                        sigdata = sigdata[n_ax].squeeze()
-#                    sigdata.plot.contourf(ax=ax, levels=[0, 0.5, 1],
-#                               transform=ccrs.PlateCarree(), hatches=['...', ''],
-#                               colors='none', add_colorbar=False,
-#                               subplot_kws={'projection': map_proj})
-#                                
-#                  
-#        
-#        if kwrgs['subtitles'] == None:
-#            pass
-#        else:
-#            fontdict = dict({'fontsize'     : 18,
-#                             'fontweight'   : 'bold'})
-#            ax.set_title(kwrgs['subtitles'][n_ax], fontdict=fontdict, loc='center')
-#        
-#        if 'drawbox' in kwrgs.keys():
-#            
-#            def get_ring(coords):
-#                '''tuple in format: west_lon, east_lon, south_lat, north_lat '''
-#                west_lon, east_lon, south_lat, north_lat = coords
-#                lons_sq = [west_lon, west_lon, east_lon, east_lon]
-#                lats_sq = [north_lat, south_lat, south_lat, north_lat]
-#                ring = LinearRing(list(zip(lons_sq , lats_sq )))
-#                return ring
-#            ring = get_ring(kwrgs['drawbox'][1])
-##            lons_sq = [-215, -215, -130, -130] #[-215, -215, -125, -125] #[-215, -215, -130, -130] 
-##            lats_sq = [50, 20, 20, 50]
-#            if kwrgs['drawbox'][0] == n_ax or kwrgs['drawbox'][0] == 'all':
-#                ax.add_geometries([ring], ccrs.PlateCarree(), facecolor='none', edgecolor='green',
-#                              linewidth=3.5)
-#        
-#        if 'ax_text' in kwrgs.keys():
-#            ax.text(0.0, 1.01, kwrgs['ax_text'][n_ax],
-#            verticalalignment='bottom', horizontalalignment='left',
-#            transform=ax.transAxes,
-#            color='black', fontsize=15)
-#            
-#        if map_proj.proj4_params['proj'] in ['merc', 'eqc']:
-##            print(True)
-#            ax.set_xticks(longitude_labels[:-1], crs=ccrs.PlateCarree())
-#            ax.set_xticklabels(longitude_labels[:-1], fontsize=12)
-#            lon_formatter = cticker.LongitudeFormatter()
-#            ax.xaxis.set_major_formatter(lon_formatter)
-#            
-#            ax.set_yticks(latitude_labels, crs=ccrs.PlateCarree())
-#            ax.set_yticklabels(latitude_labels, fontsize=12)
-#            lat_formatter = cticker.LatitudeFormatter()
-#            ax.yaxis.set_major_formatter(lat_formatter)
-#            ax.grid(linewidth=1, color='black', alpha=0.3, linestyle='--')
-#            ax.set_xlabel('')
-#            ax.set_ylabel('')
-#            
-#            
-#        else:
-#            pass
-#        
-#    if 'title_h' in kwrgs.keys():
-#        title_height = kwrgs['title_h']
-#    else:
-#        title_height = 0.98
-#    g.fig.text(0.5, title_height, kwrgs['title'], fontsize=20,
-#               fontweight='heavy', transform=g.fig.transFigure,
-#               horizontalalignment='center',verticalalignment='top')
-#    
-#    if 'adj_fig_h' in kwrgs.keys():
-#        g.fig.set_figheight(figheight*kwrgs['adj_fig_h'], forward=True)
-#    if 'adj_fig_w' in kwrgs.keys():
-#        g.fig.set_figwidth(figwidth*kwrgs['adj_fig_w'], forward=True)
-#
-#    if 'cbar_vert' in kwrgs.keys():
-#        cbar_vert = (figheight/40)/(n_plots*2) + kwrgs['cbar_vert']
-#    else:
-#        cbar_vert = (figheight/40)/(n_plots*2)
-#    if 'cbar_hght' in kwrgs.keys():
-#        cbar_hght = (figheight/40)/(n_plots*2) + kwrgs['cbar_hght']
-#    else:
-#        cbar_hght = (figheight/40)/(n_plots*2)
-#    if 'wspace' in kwrgs.keys():
-#        g.fig.subplots_adjust(wspace=kwrgs['wspace'])
-#    if 'hspace' in kwrgs.keys():
-#        g.fig.subplots_adjust(hspace=kwrgs['hspace'])
-#    if 'extend' in kwrgs.keys():
-#        if kwrgs['extend'] != None:
-#            extend = kwrgs['extend'][0]
-#        else:
-#            extend = 'neither'
-#    else:
-#        extend = 'neither'
-#
-#    cbar_ax = g.fig.add_axes([0.25, cbar_vert, 
-#                                  0.5, cbar_hght], label='cbar')
-#
-#
-##    cbar = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap, orientation='horizontal', 
-##                 extend=extend, ticks=cnorm, norm=norm)
-#
-#
-#    cbar = plt.colorbar(im, cbar_ax, cmap=cmap_, norm=norm,
-#                    orientation='horizontal', 
-#                    extend=extend)
-#
-#    if 'cticks_center' in kwrgs.keys():
-#        cbar.set_ticks(clevels + 0.5)
-#        ticklabels = np.array(clevels+1, dtype=int)
-#        cbar.set_ticklabels(ticklabels, update_ticks=True)
-#        cbar.update_ticks()
-#    
-#    if 'extend' in kwrgs.keys():
-#        if kwrgs['extend'][0] == 'min':
-#            if type(kwrgs['extend'][1]) == type(str()):
-#                cbar.cmap.set_under(kwrgs['extend'][1])
-#            else:
-#                cbar.cmap.set_under(cbar.to_rgba(kwrgs['extend'][1]))
-#    cbar.set_label(xrdata.attrs['units'], fontsize=16)
-#    cbar.ax.tick_params(labelsize=14)
-#    #%%
-#    if kwrgs['savefig'] != False:
-#        g.fig.savefig(file_name ,dpi=250, frameon=True)
-#    
-#    return g.fig
+def plotting_wrapper(plotarr, ex, filename=None,  kwrgs=None):
+#    map_proj = ccrs.Miller(central_longitude=240) 
+    try:
+        folder_name = os.path.join(ex['figpathbase'], ex['exp_folder'])
+    except:
+        folder_name = '/Users/semvijverberg/Downloads'
+    if os.path.isdir(folder_name) != True : 
+        os.makedirs(folder_name)
+
+    if kwrgs == None:
+        kwrgs = dict( {'title' : plotarr.name, 'clevels' : 'notdefault', 'steps':17,
+                        'vmin' : -3*plotarr.std().values, 'vmax' : 3*plotarr.std().values, 
+                       'cmap' : plt.cm.RdBu_r, 'column' : 1, 'subtitles' : None,
+                       'style_colormap' : 'pcolormesh'} )
+    else:
+        kwrgs = kwrgs
+        if 'title' not in kwrgs.keys():
+            kwrgs['title'] = plotarr.attrs['title']
+        if 'style_colormap' not in kwrgs.keys():
+            kwrgs['style_colormap'] = 'pcolormesh'
+            
+        
+    if filename != None:
+        file_name = os.path.join(folder_name, filename)
+        kwrgs['savefig'] = True
+    else:
+        kwrgs['savefig'] = False
+        file_name = 'Users/semvijverberg/Downloads/test.png'
+    finalfigure(plotarr, file_name, kwrgs)
+    
+
+def finalfigure(xrdata, file_name, kwrgs):
+    #%%
+    map_proj = ccrs.PlateCarree(central_longitude=220)  
+    lons = xrdata.longitude.values
+    lats = xrdata.latitude.values
+    strvars = [' {} '.format(var) for var in list(xrdata.dims)]
+    
+    var = [var for var in strvars if var not in ' longitude latitude '][0] 
+    var = var.replace(' ', '')
+    g = xr.plot.FacetGrid(xrdata, col=var, col_wrap=kwrgs['column'], sharex=True,
+                      sharey=True, subplot_kws={'projection': map_proj},
+                      aspect= (xrdata.longitude.size) / xrdata.latitude.size, size=3.5)
+    figwidth = g.fig.get_figwidth() ; figheight = g.fig.get_figheight()
+
+    lon_tick = xrdata.longitude.values
+    dg = abs(lon_tick[1] - lon_tick[0])
+    periodic = (np.arange(0, 360, dg).size - lon_tick.size) < 1
+    
+    longitude_labels = np.linspace(np.min(lon_tick), np.max(lon_tick), 6, dtype=int)
+    longitude_labels = np.array(sorted(list(set(np.round(longitude_labels, -1)))))
+
+#    longitude_labels = np.concatenate([ longitude_labels, [longitude_labels[-1]], [180]])
+#    longitude_labels = [-150,  -70,    0,   70,  140, 140]
+    latitude_labels = np.linspace(xrdata.latitude.min(), xrdata.latitude.max(), 4, dtype=int)
+    latitude_labels = sorted(list(set(np.round(latitude_labels, -1))))
+    
+    g.set_ticks(max_xticks=5, max_yticks=5, fontsize='small')
+    g.set_xlabels(label=[str(el) for el in longitude_labels])
+
+    
+    if kwrgs['clevels'] == 'default':
+        vmin = np.round(float(xrdata.min())-0.01,decimals=2) ; vmax = np.round(float(xrdata.max())+0.01,decimals=2)
+        clevels = np.linspace(-max(abs(vmin),vmax),max(abs(vmin),vmax),17) # choose uneven number for # steps
+    else:
+        vmin=kwrgs['vmin']
+        vmax=kwrgs['vmax']
+        
+        clevels = np.linspace(vmin, vmax,kwrgs['steps'])
+
+    cmap_ = kwrgs['cmap']
+    
+    if 'clim' in kwrgs.keys(): #adjust the range of colors shown in cbar
+        cnorm = np.linspace(kwrgs['clim'][0],kwrgs['clim'][1],11)
+        vmin = kwrgs['clim'][0]
+    else:
+        cnorm = clevels
+        
+
+    norm = mpl.colors.BoundaryNorm(boundaries=cnorm, ncolors=256)
+    subplot_kws = {'projection': map_proj}
+    
+    n_plots = xrdata[var].size
+    for n_ax in np.arange(0,n_plots):
+        ax = g.axes.flatten()[n_ax]
+#        print(n_ax)
+        if periodic == True:
+            plotdata = extend_longitude(xrdata[n_ax]).squeeze().drop('ds')
+        else:
+            plotdata = xrdata[n_ax].squeeze()
+        if kwrgs['style_colormap'] == 'pcolormesh':
+            im = plotdata.plot.pcolormesh(ax=ax, cmap=cmap_,
+                               transform=ccrs.PlateCarree(),
+                               subplot_kws=subplot_kws,
+                                levels=clevels, add_colorbar=False)
+        
+        if kwrgs['style_colormap'] == 'contourf':
+            im = plotdata.plot.contourf(ax=ax, cmap=cmap_,
+                               transform=ccrs.PlateCarree(),
+                               subplot_kws=subplot_kws,
+                                levels=clevels, add_colorbar=False)
+
+        if 'sign_stipling' in kwrgs.keys():
+            if kwrgs['sign_stipling'][0] == 'colorplot':
+                sigdata = kwrgs['sign_stipling'][1]
+                if periodic == True:
+                    sigdata = plot_maps.extend_longitude(sigdata[n_ax]).squeeze().drop('ds')
+                else:
+                    sigdata = sigdata[n_ax].squeeze()
+                sigdata.plot.contourf(ax=ax, levels=[0, 0.5, 1],
+                           transform=ccrs.PlateCarree(), hatches=['...', ''],
+                           colors='none', add_colorbar=False,
+                           subplot_kws={'projection': map_proj})
+            
+        ax.coastlines(color='black', alpha=0.3, facecolor='grey', linewidth=2)
+        ax.add_feature(cfeature.LAND, facecolor='grey', alpha=0.3)
+        
+        ax.set_extent([lons[0], lons[-1], lats[0], lats[-1]], ccrs.PlateCarree())
+        
+        if 'contours' in kwrgs.keys():
+            condata, con_levels = kwrgs['contours']
+            if periodic == True:
+                condata = plot_maps.extend_longitude(condata[n_ax]).squeeze().drop('ds')
+            else:
+                condata = condata[n_ax].squeeze()
+            condata.plot.contour(ax=ax, add_colorbar=False,
+                               transform=ccrs.PlateCarree(),
+                               subplot_kws={'projection': map_proj},
+                                levels=con_levels, cmap=cmap_)
+            if 'sign_stipling' in kwrgs.keys():
+                if kwrgs['sign_stipling'][0] == 'contour':
+                    sigdata = kwrgs['sign_stipling'][1]
+                    if periodic == True:
+                        sigdata = plot_maps.extend_longitude(sigdata[n_ax]).squeeze().drop('ds')
+                    else:
+                        sigdata = sigdata[n_ax].squeeze()
+                    sigdata.plot.contourf(ax=ax, levels=[0, 0.5, 1],
+                               transform=ccrs.PlateCarree(), hatches=['...', ''],
+                               colors='none', add_colorbar=False,
+                               subplot_kws={'projection': map_proj})
+                                
+                  
+        
+        if kwrgs['subtitles'] == None:
+            pass
+        else:
+            fontdict = dict({'fontsize'     : 18,
+                             'fontweight'   : 'bold'})
+            ax.set_title(kwrgs['subtitles'][n_ax], fontdict=fontdict, loc='center')
+        
+        if 'drawbox' in kwrgs.keys():
+            
+            def get_ring(coords):
+                '''tuple in format: west_lon, east_lon, south_lat, north_lat '''
+                west_lon, east_lon, south_lat, north_lat = coords
+                lons_sq = [west_lon, west_lon, east_lon, east_lon]
+                lats_sq = [north_lat, south_lat, south_lat, north_lat]
+                ring = LinearRing(list(zip(lons_sq , lats_sq )))
+                return ring
+            ring = get_ring(kwrgs['drawbox'][1])
+#            lons_sq = [-215, -215, -130, -130] #[-215, -215, -125, -125] #[-215, -215, -130, -130] 
+#            lats_sq = [50, 20, 20, 50]
+            if kwrgs['drawbox'][0] == n_ax or kwrgs['drawbox'][0] == 'all':
+                ax.add_geometries([ring], ccrs.PlateCarree(), facecolor='none', edgecolor='green',
+                              linewidth=3.5)
+        
+        if 'ax_text' in kwrgs.keys():
+            ax.text(0.0, 1.01, kwrgs['ax_text'][n_ax],
+            verticalalignment='bottom', horizontalalignment='left',
+            transform=ax.transAxes,
+            color='black', fontsize=15)
+            
+        if map_proj.proj4_params['proj'] in ['merc', 'eqc']:
+#            print(True)
+            ax.set_xticks(longitude_labels[:-1], crs=ccrs.PlateCarree())
+            ax.set_xticklabels(longitude_labels[:-1], fontsize=12)
+            lon_formatter = cticker.LongitudeFormatter()
+            ax.xaxis.set_major_formatter(lon_formatter)
+            
+            ax.set_yticks(latitude_labels, crs=ccrs.PlateCarree())
+            ax.set_yticklabels(latitude_labels, fontsize=12)
+            lat_formatter = cticker.LatitudeFormatter()
+            ax.yaxis.set_major_formatter(lat_formatter)
+            ax.grid(linewidth=1, color='black', alpha=0.3, linestyle='--')
+            ax.set_xlabel('')
+            ax.set_ylabel('')
+            
+            
+        else:
+            pass
+        
+    if 'title_h' in kwrgs.keys():
+        title_height = kwrgs['title_h']
+    else:
+        title_height = 0.98
+    g.fig.text(0.5, title_height, kwrgs['title'], fontsize=20,
+               fontweight='heavy', transform=g.fig.transFigure,
+               horizontalalignment='center',verticalalignment='top')
+    
+    if 'adj_fig_h' in kwrgs.keys():
+        g.fig.set_figheight(figheight*kwrgs['adj_fig_h'], forward=True)
+    if 'adj_fig_w' in kwrgs.keys():
+        g.fig.set_figwidth(figwidth*kwrgs['adj_fig_w'], forward=True)
+
+    if 'cbar_vert' in kwrgs.keys():
+        cbar_vert = (figheight/40)/(n_plots*2) + kwrgs['cbar_vert']
+    else:
+        cbar_vert = (figheight/40)/(n_plots*2)
+    if 'cbar_hght' in kwrgs.keys():
+        cbar_hght = (figheight/40)/(n_plots*2) + kwrgs['cbar_hght']
+    else:
+        cbar_hght = (figheight/40)/(n_plots*2)
+    if 'wspace' in kwrgs.keys():
+        g.fig.subplots_adjust(wspace=kwrgs['wspace'])
+    if 'hspace' in kwrgs.keys():
+        g.fig.subplots_adjust(hspace=kwrgs['hspace'])
+    if 'extend' in kwrgs.keys():
+        if kwrgs['extend'] != None:
+            extend = kwrgs['extend'][0]
+        else:
+            extend = 'neither'
+    else:
+        extend = 'neither'
+
+    cbar_ax = g.fig.add_axes([0.25, cbar_vert, 
+                                  0.5, cbar_hght], label='cbar')
+
+
+#    cbar = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap, orientation='horizontal', 
+#                 extend=extend, ticks=cnorm, norm=norm)
+
+
+    cbar = plt.colorbar(im, cbar_ax, cmap=cmap_, norm=norm,
+                    orientation='horizontal', 
+                    extend=extend)
+
+    if 'cticks_center' in kwrgs.keys():
+        cbar.set_ticks(clevels + 0.5)
+        ticklabels = np.array(clevels+1, dtype=int)
+        cbar.set_ticklabels(ticklabels, update_ticks=True)
+        cbar.update_ticks()
+    
+    if 'extend' in kwrgs.keys():
+        if kwrgs['extend'][0] == 'min':
+            if type(kwrgs['extend'][1]) == type(str()):
+                cbar.cmap.set_under(kwrgs['extend'][1])
+            else:
+                cbar.cmap.set_under(cbar.to_rgba(kwrgs['extend'][1]))
+    cbar.set_label(xrdata.attrs['units'], fontsize=16)
+    cbar.ax.tick_params(labelsize=14)
+    #%%
+    if kwrgs['savefig'] != False:
+        g.fig.savefig(file_name ,dpi=250, frameon=True)
+    
+    return g.fig
 #
 #
 #

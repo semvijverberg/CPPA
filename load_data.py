@@ -10,6 +10,7 @@ import xarray as xr
 import pandas as pd
 import numpy as np
 import func_CPPA
+import func_fc
 from dateutil.relativedelta import relativedelta as date_dt
 flatten = lambda l: [item for sublist in l for item in sublist]
 
@@ -31,12 +32,12 @@ def load_response_variable(ex):
     
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
 
-    RVtsfull, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
+    RVfullts, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
     if ex['tfreq'] != 1:
-        RVtsfull, dates = func_CPPA.time_mean_bins(RVtsfull, ex, ex['tfreq'])
+        RVfullts, dates = func_CPPA.time_mean_bins(RVfullts, ex, ex['tfreq'])
     
-    RVhour   = RVtsfull.time[0].dt.hour.values
-    dates_all = pd.to_datetime(RVtsfull.time.values)
+    RVhour   = RVfullts.time[0].dt.hour.values
+    dates_all = pd.to_datetime(RVfullts.time.values)
     
     
     datesRV = func_CPPA.make_datestr(dates_all, ex, 
@@ -44,7 +45,7 @@ def load_response_variable(ex):
  
 
     if ex['rollingmean'][0] == 'RV' and ex['rollingmean'][1] != 1:
-        RVtsfull = func_CPPA.rolling_mean_time(RVtsfull, ex, center=True)
+        RVfullts = func_CPPA.rolling_mean_time(RVfullts, ex, center=True)
     
     if 'exclude_yrs' in ex.keys():
         print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
@@ -71,7 +72,7 @@ def load_response_variable(ex):
     ex['endyear'] = int(datesRV[-1].year)
     
     # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
-    RV_ts = RVtsfull.sel(time=datesRV)
+    RV_ts = RVfullts.sel(time=datesRV)
     ex['n_oneyr'] = func_CPPA.get_oneyr(datesRV).size
     
 
@@ -80,18 +81,17 @@ def load_response_variable(ex):
     if ex['RVts_filename'][:8] == 'nino3.4_' and 'event_thres' in ex.keys():
         ex['event_thres'] = ex['event_thres']
     else:
-        if ex['event_percentile'] == 'std':
-            # binary time serie when T95 exceeds 1 std
-            ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
-        else:
-            percentile = ex['event_percentile']
-            ex['event_thres'] = np.percentile(RV_ts.values, percentile)
+        event_percentile = ex['kwrgs_events']['event_percentile']
+        ex['event_thres'] = func_fc.Ev_threshold(RV_ts, event_percentile)
 
     ex['n_yrs'] = int(len(set(RV_ts.time.dt.year.values)))
     ex['endyear'] = int(datesRV[-1].year)
+    
+    
+    RV = RV_class(RVfullts, RV_ts, kwrgs_events=ex['kwrgs_events'])
 
     #%%
-    return RVtsfull, RV_ts, ex
+    return RV, ex
 
 def load_precursor(ex):
     #%%
@@ -173,28 +173,34 @@ def load_precursor(ex):
     return Prec_reg, ex
 
 class RV_class:
-    def __init__(self, RV_ts, RVfullts, kwrgs_events=None):
-        self.RV_ts = RV_ts 
-        self.RVfullts = df_data[df_data.columns[0]][0]
-        if kwrgs_events != None:
-            self.threshold = Ev_threshold(self.RV_ts, 
+    def __init__(self, RVfullts, RV_ts, kwrgs_events=None):
+        self.RV_ts = RV_ts
+        self.RVfullts = RVfullts
+        if type(RVfullts) == type(xr.DataArray([0])):
+            self.dfRV_ts = RV_ts.drop('quantile').to_dataframe(name='RVfullts')
+            self.dfRVfullts = RVfullts.drop('quantile').to_dataframe(name='RVfullts')
+        self.dates_all = pd.to_datetime(self.dfRVfullts.index)
+        self.dates_RV = pd.to_datetime(self.dfRV_ts.index)
+        self.n_oneRVyr = self.dates_RV[self.dates_RV.year == self.dates_RV.year[0]].size
+        if kwrgs_events is not None:
+            self.threshold = func_fc.Ev_threshold(self.dfRV_ts, 
                                               kwrgs_events['event_percentile'])
-            self.RV_b_full = Ev_timeseries(self.RVfullts, 
+#            self.RV_b_full = func_fc.Ev_timeseries(self.RVfullts, 
+#                               threshold=self.threshold , 
+#                               min_dur=kwrgs_events['min_dur'],
+#                               max_break=kwrgs_events['max_break'], 
+#                               grouped=kwrgs_events['grouped'])[0]
+            self.RV_bin   = func_fc.Ev_timeseries(self.dfRV_ts, 
                                threshold=self.threshold , 
                                min_dur=kwrgs_events['min_dur'],
                                max_break=kwrgs_events['max_break'], 
                                grouped=kwrgs_events['grouped'])[0]
-            self.RV_bin   = self.RV_b_full[df_data['RV_mask'][0]] 
-            self.prob_clim = get_obs_clim(self)
-        self.dates_all = self.RV_b_full.index
-        self.dates_RV = self.RV_bin.index
-        self.TrainIsTrue = df_data['TrainIsTrue']
-        self.RV_mask = df_data['RV_mask']
-        self.freq      = get_freq_years(self)
-        self.n_oneRVyr = self.dates_RV[self.dates_RV.year == self.dates_RV.year[0]].size
+            self.freq      = func_fc.get_freq_years(self)
+        
+        
 
 def load_data(ex):
-    RVtsfull, RV_ts, ex = load_response_variable(ex)
+    RVfullts, RV_ts, ex = load_response_variable(ex)
     Prec_reg, ex = load_precursor(ex)
     return RV_ts, Prec_reg, ex
 
@@ -242,9 +248,9 @@ def load_1d(filename, ex, name='RVfullts95'):
         
         dicRV = np.load(filename,  encoding='latin1', allow_pickle=True).item()
         try:    
-            RVtsfull = dicRV[name]
+            RVfullts = dicRV[name]
         except:
-            RVtsfull = dicRV['RVfullts']
+            RVfullts = dicRV['RVfullts']
         if ex['datafolder'] == 'ERAint':
             try:
                 ex['mask'] = dicRV['RV_array']['mask']
@@ -260,5 +266,5 @@ def load_1d(filename, ex, name='RVfullts95'):
         lpyr = False
     else:  
         lpyr = True
-        RVtsfull = csv_to_xarray(ex, filename, delim_whitespace=False, header=None)
-    return RVtsfull, lpyr
+        RVfullts = csv_to_xarray(ex, filename, delim_whitespace=False, header=None)
+    return RVfullts, lpyr

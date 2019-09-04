@@ -23,19 +23,22 @@ else:
     data_base_path = "/p/projects/gotham/semvij"
 os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
+RGCPD_dir  = os.path.join(script_dir, 'RGCPD/RGCPD')
 if script_dir not in sys.path: sys.path.append(script_dir)
+if RGCPD_dir not in sys.path: sys.path.append(RGCPD_dir)
 if sys.version[:1] == '3':
     from importlib import reload as rel
 
+import cartopy.crs as ccrs
 import numpy as np
 import xarray as xr 
 import pandas as pd
 import matplotlib.pyplot as plt
 import func_CPPA
-import func_pred
+import functions_pp
 import load_data
-import ROC_score
-from ROC_score import plotting_timeseries
+import functions_RGCPD as rgcpd
+import plot_maps
 
 xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
@@ -61,20 +64,18 @@ ex = settings.__init__()
 # =============================================================================
 # load data (write your own function load_data(ex) )
 # =============================================================================
-RVtsfull, RV_ts, ex = load_data.load_response_variable(ex)
-Prec_reg, ex = load_data.load_precursor(ex)
+RV, ex = load_data.load_response_variable(ex)
+precur_arr, ex = load_data.load_precursor(ex)
 
-print_ex = ['RV_name', 'name', 'max_break',
-            'min_dur', 'event_percentile',
+print_ex = ['RV_name', 'name', 'kwrgs_events',
             'event_thres', 'extra_wght_dur',
             'grid_res', 'startyear', 'endyear', 
-            'startperiod', 'endperiod', 'leave_n_out',
+            'startperiod', 'endperiod', 
             'n_oneyr', 'wghts_accross_lags', 'add_lsm',
             'tfreq', 'lags', 'n_yrs', 'region',
             'rollingmean', 'seed',
             'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
-             'distance_eps_init',
-            'ROC_leave_n_out', 'method', 'n_boot',
+            'method', 
             'RVts_filename', 'path_pp', 'RV_aggregation']
 
 
@@ -96,193 +97,167 @@ ex['n'] = n ; lag=0
  
 
 
-# In[ ]:
-
+#%%
 
 # =============================================================================
 # Run code with ex settings
 # =============================================================================
 #ex['lags'] = [0]; ex['method'] = 'no_train_test_split' ; 
-l_ds_CPPA, ex = func_CPPA.main(RV_ts, Prec_reg, ex)
+traintest, ex = functions_pp.rand_traintest_years(RV, precur_arr, ex)
+CPPA_prec = func_CPPA.get_robust_precursors(precur_arr, RV, traintest, ex)
+actor = func_CPPA.act('sst', CPPA_prec, precur_arr)
+actor, ex = rgcpd.cluster_DBSCAN_regions(actor, ex)
+if np.isnan(actor.prec_labels.values).all() == False:
+    rgcpd.plot_regs_xarray(actor.prec_labels.copy(), ex)
+central_lon_plots = 200
+map_proj = ccrs.LambertCylindrical(central_longitude=central_lon_plots)
+kwrgs_corr = {'clim' : (-0.5, 0.5), 'hspace':-0.6}
+plot_maps.plot_corr_maps(actor.corr_xr, actor.corr_xr['mask'].astype(bool), map_proj, kwrgs_corr)
 
 
-# save ex setting in text file
-output_dic_folder = ex['output_dic_folder']
-#if os.path.isdir(output_dic_folder):
-#    answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
-#    if 'n' in answer:
-#        assert (os.path.isdir(output_dic_folder) != True)
-#    elif 'y' in answer:
-#        pass
-
-if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
-
-# save output in numpy dictionary
-filename = 'output_main_dic'
-if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
-to_dict = dict( { 'ex'      :   ex,
-                 'l_ds_CPPA' : l_ds_CPPA} )
-np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
-
-# write output in textfile
-if 'output_dic_folder' not in print_ex: print_ex.append('output_dic_folder')
-txtfile = os.path.join(output_dic_folder, 'experiment_settings.txt')
-with open(txtfile, "w") as text_file:
-    max_key_len = max([len(i) for i in print_ex])
-    for key in print_ex:
-        key_len = len(key)
-        expand = max_key_len - key_len
-        key_exp = key + ' ' * expand
-        printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
-        print(printline, file=text_file)
-
-
-
-
-subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
-total_folder = os.path.join(ex['figpathbase'], subfolder)
-if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-# 'group_accros_tests_single_lag' 
-# 'group_across_test_and_lags'
-
-if ex['method'] == 'iter': 
-    eps = 10
-    l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                     grouping = 'group_accros_tests_single_lag', eps=10)
-if ex['method'][:6] == 'random':
- 
-    eps = 11 ; grouping = 'group_across_test_and_lags'
-    if ex['datafolder'] == 'EC': 
-        eps = 7 ; grouping = 'group_across_test_and_lags'
-    l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                     grouping = grouping, eps=eps)
-
- 
-func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA', [0, 5], None, ex)
-print('\n\n\nCheck labelling\n\n\n')
-func_CPPA.plot_precursor_regions(l_ds_CPPA, 10, 'pat_num_CPPA_clust', [0, 5], None, ex)
-
-if ex['store_timeseries'] == True:
-    ex['eps_traintest'] = eps
-    func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-    
-
-    to_dict = dict( { 'ex'      :   ex,
-                     'l_ds_CPPA' : l_ds_CPPA} )
-    np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
-    path_ts = ex['output_ts_folder']
-    SCORE, ex = ROC_score.CV_wrapper(RV_ts, ex, path_ts, lag_to_load=ex['lags'], keys=['spatcov_CPPA'])
-
-
-#%% 
-RVaggr = 'RVfullts95'
-EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-era5T95   = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-erai      = f'/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_{RVaggr}_rng50_2019-07-04/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-
-### same mask Bram
-#EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-#erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-
-
-
-if ex['datafolder'] == 'ERAint': output_dic_folder = erai
-if ex['datafolder'] == 'era5': output_dic_folder = era5T95
-if ex['datafolder'] == 'EC': output_dic_folder = EC_folder
+##%%
+## save ex setting in text file
+#output_dic_folder = ex['output_dic_folder']
+##if os.path.isdir(output_dic_folder):
+##    answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
+##    if 'n' in answer:
+##        assert (os.path.isdir(output_dic_folder) != True)
+##    elif 'y' in answer:
+##        pass
+#
+#if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
+#
+## save output in numpy dictionary
+#filename = 'output_main_dic'
+#if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
+#to_dict = dict( { 'ex'      :   ex,
+#                 'CPPA_prec' : CPPA_prec} )
+#np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
+#
+## write output in textfile
+#if 'output_dic_folder' not in print_ex: print_ex.append('output_dic_folder')
+#txtfile = os.path.join(output_dic_folder, 'experiment_settings.txt')
+#with open(txtfile, "w") as text_file:
+#    max_key_len = max([len(i) for i in print_ex])
+#    for key in print_ex:
+#        key_len = len(key)
+#        expand = max_key_len - key_len
+#        key_exp = key + ' ' * expand
+#        printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
+#        print(printline, file=text_file)
+#
+#
+#
+#
+##%% 
+#RVaggr = 'RVfullts95'
+#EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#era5T95   = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#erai      = f'/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_{RVaggr}_rng50_2019-07-04/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#
+#### same mask Bram
+##EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+##erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
+#
+#
+#
+#if ex['datafolder'] == 'ERAint': output_dic_folder = erai
+#if ex['datafolder'] == 'era5': output_dic_folder = era5T95
+#if ex['datafolder'] == 'EC': output_dic_folder = EC_folder
+##    
 #    
-    
-# =============================================================================
-# Load and Generate output in console
-# =============================================================================
-#output_dic_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-05-23/lags[0,10,20,30]Ev1d0p'
-
-from scoringclass import SCORE_CLASS
-filename = 'output_main_dic'
-dic = np.load(os.path.join(output_dic_folder, filename+'.npy'),  encoding='latin1').item()
-# load settings
-ex = dic['ex']
-# load patterns
-try:
-    l_ds_CPPA = dic['l_ds_CPPA']
-except:
-    l_ds_CPPA = dic['l_ds_PEP']
-if 'score' in ex.keys():
-    SCORE = ex['score']
-
-ex['store_timeseries'] = False
-#%%
+## =============================================================================
+## Load and Generate output in console
+## =============================================================================
+##output_dic_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-05-23/lags[0,10,20,30]Ev1d0p'
+#
+#from scoringclass import SCORE_CLASS
+#filename = 'output_main_dic'
+#dic = np.load(os.path.join(output_dic_folder, filename+'.npy'),  encoding='latin1').item()
+## load settings
+#ex = dic['ex']
+## load patterns
+#try:
+#    l_ds_CPPA = dic['l_ds_CPPA']
+#except:
+#    l_ds_CPPA = dic['l_ds_PEP']
+#if 'score' in ex.keys():
+#    SCORE = ex['score']
+#
+#ex['store_timeseries'] = False
+##%%
 #ex['grouped'] = True
 #ex['lags'] = [0, 20, 40]
 #ex['store_timeseries']  = False
-ex['event_percentile']  = 50
-#ex['min_dur']           = 4
-#ex['max_break']         = 0
-#if ex['event_percentile'] == 'std':
-#    # binary time serie when T95 exceeds 1 std
-#    ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
+#ex['event_percentile']  = 50
+##ex['min_dur']           = 4
+##ex['max_break']         = 0
+##if ex['event_percentile'] == 'std':
+##    # binary time serie when T95 exceeds 1 std
+##    ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
+##else:
+##    percentile = ex['event_percentile']
+##    ex['event_thres'] = np.percentile(RV_ts.values, percentile)
+##tim = func_CPPA.Ev_timeseries(RV_ts, ex['event_thres'], ex, grouped=ex['grouped'])[0].time
+##tim.size / RV_ts.size
+#
+#
+## write output in textfile
+#if 'use_ts_logit' in ex.keys() and 'pval_logit_final' in ex.keys():
+#    predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
 #else:
-#    percentile = ex['event_percentile']
-#    ex['event_thres'] = np.percentile(RV_ts.values, percentile)
-#tim = func_CPPA.Ev_timeseries(RV_ts, ex['event_thres'], ex, grouped=ex['grouped'])[0].time
-#tim.size / RV_ts.size
-
-
-# write output in textfile
-if 'use_ts_logit' in ex.keys() and 'pval_logit_final' in ex.keys():
-    predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
-else:
-    predict_folder = ''
-ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
-main_output = os.path.join(ex['figpathbase'], ex['exp_folder'])
-if os.path.isdir(main_output) != True : os.makedirs(main_output)
-
-txtfile = os.path.join(main_output, 'experiment_settings.txt')
-with open(txtfile, "w") as text_file:
-    max_key_len = max([len(i) for i in print_ex])
-    for key in print_ex:
-        key_len = len(key)
-        expand = max_key_len - key_len
-        key_exp = key + ' ' * expand
-        printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
-        print(printline)
-        print(printline, file=text_file)
-
-# =============================================================================
-# perform prediciton        
-# =============================================================================
-
-# write output in textfile
-if 'use_ts_logit' in ex.keys():
-    if ex['use_ts_logit'] == True:
-        predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
-else:
-    ex['use_ts_logit'] = False
-    predict_folder = ''
-ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
-if ex['store_timeseries'] == True:
-    
-    if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
-        l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-                         grouping = 'group_accros_tests_single_lag', eps=10)
-        key_pattern_num = 'pat_num_CPPA_clust'
-    else:
-        key_pattern_num = 'pat_num_CPPA'
-    func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-    ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
-    ex = ROC_score.func_AUC_wrapper(ex)
-else:
-    key_pattern_num = 'pat_num_CPPA'
-    ex, SCORE = ROC_score.only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-    ex['score'] = SCORE
-    filename_2 = 'output_main_dic_with_score_th{}'.format(ex['event_percentile'])
-    to_dict = dict( { 'ex'      :   ex,
-                     'l_ds_CPPA' : l_ds_CPPA} )
-    np.save(os.path.join(output_dic_folder, filename_2+'.npy'), to_dict) 
-if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
-
-ROC_score.create_validation_plot([output_dic_folder], metric='AUC', getPEP=False)
-ROC_score.create_validation_plot([output_dic_folder], metric='brier', getPEP=False)
+#    predict_folder = ''
+#ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
+#main_output = os.path.join(ex['figpathbase'], ex['exp_folder'])
+#if os.path.isdir(main_output) != True : os.makedirs(main_output)
+#
+#txtfile = os.path.join(main_output, 'experiment_settings.txt')
+#with open(txtfile, "w") as text_file:
+#    max_key_len = max([len(i) for i in print_ex])
+#    for key in print_ex:
+#        key_len = len(key)
+#        expand = max_key_len - key_len
+#        key_exp = key + ' ' * expand
+#        printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
+#        print(printline)
+#        print(printline, file=text_file)
+#
+## =============================================================================
+## perform prediciton        
+## =============================================================================
+#
+## write output in textfile
+#if 'use_ts_logit' in ex.keys():
+#    if ex['use_ts_logit'] == True:
+#        predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
+#else:
+#    ex['use_ts_logit'] = False
+#    predict_folder = ''
+#ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
+#if ex['store_timeseries'] == True:
+#    
+#    if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
+#        l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
+#                         grouping = 'group_accros_tests_single_lag', eps=10)
+#        key_pattern_num = 'pat_num_CPPA_clust'
+#    else:
+#        key_pattern_num = 'pat_num_CPPA'
+#    func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+#    ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
+#    ex = ROC_score.func_AUC_wrapper(ex)
+#else:
+#    key_pattern_num = 'pat_num_CPPA'
+#    ex, SCORE = ROC_score.only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
+#    ex['score'] = SCORE
+#    filename_2 = 'output_main_dic_with_score_th{}'.format(ex['event_percentile'])
+#    to_dict = dict( { 'ex'      :   ex,
+#                     'l_ds_CPPA' : l_ds_CPPA} )
+#    np.save(os.path.join(output_dic_folder, filename_2+'.npy'), to_dict) 
+#if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
+#
+#ROC_score.create_validation_plot([output_dic_folder], metric='AUC', getPEP=False)
+#ROC_score.create_validation_plot([output_dic_folder], metric='brier', getPEP=False)
 
 #%% New scoring func
 path_ts = ex['output_ts_folder']

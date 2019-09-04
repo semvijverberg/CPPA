@@ -45,17 +45,20 @@ def __init__():
          'name'         :       'sst',
          'add_lsm'      :       False,
          'region'       :       'Northern',
-         'lags'         :       [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75], #[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]
+         'lags'         :       [0, 50], #[0, 10, 20, 35, 50, 65]
          'plot_ts'      :       True,
-         'exclude_yrs'  :       []
+         'exclude_yrs'  :       [],
+         'verbosity'    :       1,
          }
     # =============================================================================
     # Settings for event timeseries
     # =============================================================================
     ex['tfreq']                 =       1 
-    ex['max_break']             =       0   
-    ex['min_dur']               =       1
-    ex['event_percentile']      =       'std'
+    ex['kwrgs_events']          =   { 'event_percentile':'std',
+                                      'max_break' : 0,
+                                      'min_dur'   : 1,
+                                      'grouped'   : False }
+
     ex['RV_aggregation']        =       'RVfullts95'
     # =============================================================================
     # Settins for precursor / CPPA
@@ -69,24 +72,34 @@ def __init__():
         
     ex['rollingmean']           =       ('RV', 1)
     ex['extra_wght_dur']        =       False
-    ex['prec_reg_max_d']        =       1
     ex['SCM_percentile_thres']  =       95
     ex['FCP_thres']             =       0.80
-    ex['min_perc_area']         =       0.02 # min size region - in % of total prec area [m2]
-    ex['min_area_in_degrees2']  =       3
-    ex['distance_eps_init']     =       275 # km apart from cores sample, standard = 300
     ex['wghts_accross_lags']    =       False
     ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
     ex['days_before']           =       [0, 7, 14]
     ex['store_timeseries']      =       False
-    ex['seed']                  =       50
+
     # =============================================================================
-    # Settings for validation     
+    # settings precursor region selection
+    # =============================================================================   
+    ex['distance_eps'] = 500 # proportional to km apart from a core sample, standard = 1000 km
+    ex['min_area_in_degrees2'] = 5 # minimal size to become precursor region (core sample)
+    ex['group_split'] = 'together' # choose 'together' or 'seperate'
     # =============================================================================
-    ex['leave_n_out']           =       True
-    ex['ROC_leave_n_out']       =       False
-    ex['method']                =       'random10fold' #'iter' or 'no_train_test_split' or split#8 or random3  
-    ex['n_boot']                =       1
+    # Train test split
+    # =============================================================================
+    ###options###
+    # (1) random{int}   :   with the int(ex['method'][6:8]) determining the amount of folds
+    # (2) ran_strat{int}:   random stratified folds, stratified based upon events, 
+    #                       requires kwrgs_events.    
+    # (3) leave{int}    :   chronologically split train and test years.
+    # (4) split{int}    :   split dataset into single train and test set
+    # (5) no_train_test_split
+    
+    ex['method'] = 'ran_strat10' ; ex['seed'] = 30 
+    ex['fig_path'] = f"{ex['method']}_s{ex['seed']}"
+    ex['params'] = ''
+    ex['file_type2'] = 'png'
     
     if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
         ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 

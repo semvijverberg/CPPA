@@ -64,7 +64,8 @@ mpl.rcParams['figure.titlesize'] = 'medium'
 
 
 
-def get_robust_precursors(precur_arr, RV, df_splits, lags_i=np.array([1])):
+def get_robust_precursors(precur_arr, RV, df_splits, lags_i=np.array([1]), 
+                          kwrgs_CPPA={}):
     #%%
 #    v = ncdf ; V = array ; RV.RV_ts = ts of RV, time_range_all = index range of whole ts
     """
@@ -119,7 +120,8 @@ def get_robust_precursors(precur_arr, RV, df_splits, lags_i=np.array([1])):
 #        RV_period = [string_full.index(date) for date in string_full if date in string_RV]
         
         
-        CPPA_prec, weights = CPPA_single_split(RV_bin, precur, ex)
+        CPPA_prec, weights = CPPA_single_split(RV_bin, precur, lags_i=lags_i,
+                                               kwrgs_CPPA=kwrgs_CPPA)
         
 
         np_data[s] = CPPA_prec.data
@@ -138,40 +140,40 @@ def get_robust_precursors(precur_arr, RV, df_splits, lags_i=np.array([1])):
     return xrcorr
 
 
-def CPPA_single_split(RV_bin, Prec_reg, ex):
+def CPPA_single_split(RV_bin, precur, lags_i, kwrgs_CPPA):
     #%%  
-    lats = Prec_reg.latitude
-    lons = Prec_reg.longitude
+    lats = precur.latitude
+    lons = precur.longitude
     
-    weights     = np.zeros( (len(ex['lags']), len(lats), len(lons)) )
+    weights     = np.zeros( (len(lags_i), len(lats), len(lons)) )
 
        
     events = RV_bin[RV_bin==1].dropna().index
     RV_dates_train = RV_bin.index
     all_yrs_set = list(set(RV_dates_train.year.values))
     comp_years = list(events.year.values)
-    mask_chunks = get_chunks(all_yrs_set, comp_years, ex)
+    mask_chunks = get_chunks(all_yrs_set, comp_years, kwrgs_CPPA['perc_yrs_out'])
     #%%
-    Comp_robust = np.ma.zeros( (len(lats) * len(lons), len(ex['lags'])) )
+    Comp_robust = np.ma.zeros( (len(lats) * len(lons), len(lags_i)) )
     
-    max_lag_dates = find_precursors.func_dates_min_lag(RV_dates_train, max(ex['lags']))[1]
+    max_lag_dates = find_precursors.func_dates_min_lag(RV_dates_train, max(lags_i))[1]
     dates_lags  = sorted(np.unique(np.concatenate([max_lag_dates, RV_dates_train])))
     dates_lags  = pd.to_datetime(dates_lags)
-    std_train_lag = Prec_reg.sel(time=dates_lags).std(dim='time', skipna=True)
+    std_train_lag = precur.sel(time=dates_lags).std(dim='time', skipna=True)
     
-    for idx, lag in enumerate(ex['lags']):
+    for idx, lag in enumerate(lags_i):
         
         events_min_lag = find_precursors.func_dates_min_lag(events, lag)[1]
         dates_train_min_lag = find_precursors.func_dates_min_lag(RV_dates_train, lag)[1]
-    #        std_train_min_lag[idx] = Prec_reg.sel(time=dates_train_min_lag).std(dim='time', skipna=True)
+    #        std_train_min_lag[idx] = precur.sel(time=dates_train_min_lag).std(dim='time', skipna=True)
     #        std_train_lag = std_train_min_lag[idx]
         
-    
+        _kwrgs_CPPA = {k:i for k, i in kwrgs_CPPA.items() if k != 'perc_yrs_out'}
         # extract precursor regions composite approach
-        Comp_robust[:,idx], weights[idx] = extract_regs_p1(Prec_reg, mask_chunks, events_min_lag, 
-                                             dates_train_min_lag, std_train_lag, ex)  
+        Comp_robust[:,idx], weights[idx] = extract_regs_p1(precur, mask_chunks, events_min_lag, 
+                                             dates_train_min_lag, std_train_lag, **_kwrgs_CPPA)  
 
-    Composite = Comp_robust[:,:].reshape( (len(lats), len(lons), len(ex['lags'])) )
+    Composite = Comp_robust[:,:].reshape( (len(lats), len(lons), len(lags_i)) )
     Composite = Composite.swapaxes(0,-1).swapaxes(1,2)
     Composite = Composite * weights
     #%%
@@ -309,10 +311,9 @@ def get_spatcovs(dict_ds, df_split, s, lag, outdic_actors, normalize=True):
 # =============================================================================
 # =============================================================================
 
-def get_chunks(all_yrs_set, comp_years, ex):
+def get_chunks(all_yrs_set, comp_years, perc_yrs_out=[5, 7.5, 10, 12.5, 15]):
 
     n_yrs = len(all_yrs_set)
-    perc_yrs_out = ex['perc_yrs_out']
     years_n_out = list(set([int(np.round(n_yrs*p/100., decimals=0)) for p in perc_yrs_out]))
     chunks = []
     for n_out in years_n_out:    
@@ -331,7 +332,9 @@ def get_chunks(all_yrs_set, comp_years, ex):
     return mask_chunk
 
 
-def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag, std_train_lag, ex):
+def extract_regs_p1(precur, mask_chunks, events_min_lag, dates_train_min_lag, 
+                    std_train_lag, days_before=[0, 7, 14], FCP_thres=0.8,
+                    SCM_percentile_thres=95):
     #%% 
 #    T, pval, mask_sig = Welchs_t_test(sample, full, alpha=0.01)
 #    threshold = np.reshape( mask_sig, (mask_sig.size) )
@@ -341,13 +344,12 @@ def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag
     # divide train set into train-feature and train-weights part:
 #    start = time.time()   
     
-    lats = Prec_train.latitude
-    lons = Prec_train.longitude    
-    lsm  = np.isnan(Prec_train[0])
-    days_before = ex['days_before']
+    lats = precur.latitude
+    lons = precur.longitude    
+    lsm  = np.isnan(precur[0])
     comp_train_stack = np.empty( (len(days_before), events_min_lag.size, lats.size* lons.size), dtype='int16')
     for i, d in enumerate(days_before):
-        Prec_RV_train = Prec_train.sel(time=dates_train_min_lag - pd.Timedelta(d, 'd'))
+        Prec_RV_train = precur.sel(time=dates_train_min_lag - pd.Timedelta(d, 'd'))
         comp_train_i = Prec_RV_train.sel(time=events_min_lag - pd.Timedelta(d, 'd'))
         comp_train_n = np.array((comp_train_i/std_train_lag)*1000, dtype='int16')
         comp_train_n[:,lsm] = 0
@@ -358,45 +360,48 @@ def extract_regs_p1(Prec_train, mask_chunks, events_min_lag, dates_train_min_lag
         
     import numba # conda install -c conda-forge numba=0.43.1
     
-    def make_composites(mask_chunk, comp_train_stack, iter_regions):
+    def _make_composites(mask_chunks, comp_train_stack, iter_regions):
         
         
         for subset_i in range(comp_train_stack.shape[0]):
             comp_train_n = comp_train_stack[subset_i, :, :]
-            for idx in range(mask_chunk.shape[0]):
-#                comp_train_stack[subset_i, mask_chunk[idx], :]
-                comp_subset = comp_train_n[mask_chunk[idx], :]
+            for idx in range(mask_chunks.shape[0]):
+#                comp_train_stack[subset_i, mask_chunks[idx], :]
+                comp_subset = comp_train_n[mask_chunks[idx], :]
     
                 sumcomp = np.zeros( comp_subset.shape[1] )
                 for i in range(comp_subset.shape[0]):
                     sumcomp += comp_subset[i]
                 mean = sumcomp / comp_subset.shape[0]
     
-                threshold = np.nanpercentile(mean, 95)
-                mean[np.isnan(mean)] = 0
-                idx += subset_i * mask_chunk.shape[0]
+#                threshold = np.nanpercentile(mean, 95)
+#                threshold = np.percentile(mean[~np.isnan(mean)], 95)
+                threshold = np.percentile(mean, 95)
+#                mean[np.isnan(mean)] = 0
+                idx += subset_i * mask_chunks.shape[0]
 
                 iter_regions[idx] = np.abs(mean) > ( threshold )
 
             
         return iter_regions
 
-    jit_make_composites = numba.jit(nopython=True, parallel=True)(make_composites)
+    jit_make_composites = numba.jit(nopython=True)(_make_composites)
     
     iter_regions = np.zeros( (comp_train_stack.shape[0]*len(mask_chunks), comp_train_stack[0,0].size), dtype='int8')
     iter_regions = jit_make_composites(mask_chunks, comp_train_stack, iter_regions)
+    del jit_make_composites
     
 #    iter_regions = make_composites(mask_chunks, comp_train_stack, iter_regions)
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.sum(iter_regions, axis=0), (lats.size, lons.size))) ; plt.colorbar()
 
-    mask_final = ( np.sum(iter_regions, axis=0) < int(ex['FCP_thres'] * iter_regions.shape[0]))
+    mask_final = ( np.sum(iter_regions, axis=0) < int(FCP_thres * iter_regions.shape[0]))
 #    plt.figure(figsize=(10,15)) ; plt.imshow(np.reshape(np.array(mask_final, dtype=int), (lats.size, lons.size))) ; plt.colorbar()
     weights = np.sum(iter_regions, axis=0)
     weights[mask_final==True] = 0.
     sum_count = np.reshape(weights, (lats.size, lons.size))
     weights = sum_count / np.max(sum_count)
     
-    composite_p1 = Prec_train.sel(time=events_min_lag).mean(dim='time', skipna=True)
+    composite_p1 = precur.sel(time=events_min_lag).mean(dim='time', skipna=True)
     nparray_comp = np.reshape(np.nan_to_num(composite_p1.values), (composite_p1.size))
 #    nparray_comp = np.nan_to_num(composite_p1.values)
     Comp_robust_lag = np.ma.MaskedArray(nparray_comp, mask=mask_final)

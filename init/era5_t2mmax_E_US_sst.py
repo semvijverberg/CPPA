@@ -45,7 +45,7 @@ def __init__():
          'senddate'     :       '09-30', # precursor period
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-         'RVts_filename':       'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19.npy', 
+         'RVts_filename':       'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19_Xzkup1.npy', 
          'RV_name'      :       't2mmax',
          'name'         :       'sst',
          'add_lsm'      :       False,

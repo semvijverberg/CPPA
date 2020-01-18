@@ -97,8 +97,8 @@ def printset(print_ex=print_ex, ex=ex):
 printset()
 n = 0
 ex['n'] = n ; lag=0
-
  
+
 
 
 #%%
@@ -108,10 +108,17 @@ ex['n'] = n ; lag=0
 # =============================================================================
 #ex['lags'] = np.array([0]) ; ex['method'] = 'no_train_test_split' ; 
 today = datetime.datetime.today().strftime("%d-%m-%y_%Hhr")
-traintest = functions_pp.rand_traintest_years(RV, method=ex['method'], 
+df_splits = functions_pp.rand_traintest_years(RV, method=ex['method'], 
                                                   seed=ex['seed'], 
                                                   kwrgs_events=ex['kwrgs_events'])
-CPPA_prec = func_CPPA.get_robust_precursors(precur_arr, RV, traintest, ex)
+kwrgs_CPPA = {'perc_yrs_out':[5, 7.5, 10, 12.5, 15],
+              'days_before':[0, 7, 14],
+              'FCP_thres':0.8,
+              'SCM_percentile_thres':95}
+
+CPPA_prec = func_CPPA.get_robust_precursors(precur_arr, RV, df_splits, 
+                                            lags_i=np.array([1]),
+                                            kwrgs_CPPA=kwrgs_CPPA)
 actor = func_CPPA.act('sst', CPPA_prec, precur_arr)
 actor, ex = find_precursors.cluster_DBSCAN_regions(actor, ex)
 CPPA_prec['prec_labels'] = actor.prec_labels
@@ -119,7 +126,7 @@ if np.isnan(actor.prec_labels.values).all() == False:
     find_precursors.plot_regs_xarray(actor.prec_labels.copy(), ex)
 actor.ts_corr = find_precursors.spatial_mean_regions(actor, ex)    
 # get PEP
-PEP_xr = func_CPPA.get_PEP(precur_arr, RV, traintest, ex)
+PEP_xr = func_CPPA.get_PEP(precur_arr, RV, df_splits, ex)
 
 ds = xr.Dataset({'sst' : CPPA_prec, 'PEP' : PEP_xr})
 fname = '{}_{}_output.nc'.format(ex['datafolder'], today)
@@ -177,18 +184,18 @@ for l, lag in enumerate(ex['lags']):
     
     
     df_data_ts = ts_lag(actor, lag)
-    df_data_ts = df_data_ts.merge(traintest, left_index=True, right_index=True)
+    df_data_ts = df_data_ts.merge(df_splits, left_index=True, right_index=True)
     df_data_lag = add_spactov(dict_ds, lag, df_data_ts, actor)
     if l == 0:
         # PDO and ENSO do not depend on lag
         filepath = os.path.join(ex['path_pp'], ex['filename_precur'])
         if ex['datafolder'] == 'EC':
-            df_PDO, PDO_patterns = climate_indices.PDO_temp(actor.precur_arr, ex, traintest)            
+            df_PDO, PDO_patterns = climate_indices.PDO_temp(actor.precur_arr, ex, df_splits)            
         else:
-            df_PDO, PDO_patterns = climate_indices.PDO(filepath, ex, traintest)
+            df_PDO, PDO_patterns = climate_indices.PDO(filepath, ex, df_splits)
         df_data_lag = df_PDO.merge(df_data_lag, left_index=True, right_index=True)
         
-        df_ENSO_34  = climate_indices.ENSO_34(filepath, ex, traintest)
+        df_ENSO_34  = climate_indices.ENSO_34(filepath, ex, df_splits)
     
         df_data_lag = df_ENSO_34.merge(df_data_lag, left_index=True, right_index=True)
     df_data_lag = add_RV(df_data_lag, RV)

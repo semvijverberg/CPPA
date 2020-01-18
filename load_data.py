@@ -43,7 +43,7 @@ def load_response_variable(ex):
     dates_all = pd.to_datetime(RVfullts.time.values)
     
     start_end_TVdate = (ex['startperiod'], ex['endperiod'])
-    datesRV = functions_pp.make_TVdatestr(dates_all, 
+    datesRV = core_pp.get_subdates(dates_all, 
                                           start_end_TVdate, lpyr=lpyr)
     
     

@@ -189,10 +189,11 @@ class act:
         self.area_grid = find_precursors.get_area(precur_arr)
         self.grid_res = abs(self.lon_grid[1] - self.lon_grid[0])
 
-def get_PEP(precur_arr, RV, traintest, ex):
+def get_PEP(precur_arr, RV, df_splits, lags_i=np.array([1])):
     
     
-    lags = np.array(ex['lags'], dtype=int)   
+    n_spl = df_splits.index.levels[0].size
+    lags = np.array(lags_i, dtype=int)   
 
     precur_mck = precur_arr#find_region(precur_arr, 'Mckinnonplot')
     # make new xarray to store results
@@ -202,21 +203,21 @@ def get_PEP(precur_arr, RV, traintest, ex):
     PEP_xr = xr.concat(list_xr, dim = 'lag')
     PEP_xr['lag'] = ('lag', lags)
     # add train test split     
-    list_xr = [PEP_xr.expand_dims('split', axis=0) for i in range(ex['n_spl'])]
+    list_xr = [PEP_xr.expand_dims('split', axis=0) for i in range(n_spl)]
     PEP_xr = xr.concat(list_xr, dim = 'split')           
-    PEP_xr['split'] = ('split', range(ex['n_spl']))
+    PEP_xr['split'] = ('split', range(n_spl))
     
     np_data = np.zeros_like(PEP_xr.values)
     
     
 
     for s in PEP_xr.split.values:
-        progress = int(100 * (s+1) / ex['n_spl'])
+        progress = int(100 * (s+1) / n_spl)
         # =============================================================================
         # Split train test methods ['random'k'fold', 'leave_'k'_out', ', 'no_train_test_split']        
         # =============================================================================
-        RV_mask     = traintest.loc[s]['RV_mask']
-        TrainIsTrue = traintest.loc[s]['TrainIsTrue']
+        RV_mask     = df_splits.loc[s]['RV_mask']
+        TrainIsTrue = df_splits.loc[s]['TrainIsTrue']
         RV_train = TrainIsTrue[np.logical_and(RV_mask, TrainIsTrue)].index
         RV_bin = RV.RV_bin.loc[RV_train]
         precur = precur_mck.sel(time=TrainIsTrue[TrainIsTrue].index)
@@ -229,7 +230,7 @@ def get_PEP(precur_arr, RV, traintest, ex):
 #        RV_period = [string_full.index(date) for date in string_full if date in string_RV]
         
         
-        PEP_np = PEP_single_split(RV_bin, precur, ex)
+        PEP_np = PEP_single_split(RV_bin, precur, lags_i)
         
 
         np_data[s] = PEP_np
@@ -245,12 +246,12 @@ def get_PEP(precur_arr, RV, traintest, ex):
     return PEP_xr    
 
 
-def PEP_single_split(RV_bin, precur, ex):
+def PEP_single_split(RV_bin, precur, lags_i):
     lats = precur.latitude
     lons = precur.longitude
-    np_data = np.zeros( (len(ex['lags']), len(lats), len(lons)) )   
+    np_data = np.zeros( (len(lags_i), len(lats), len(lons)) )   
     events = RV_bin[RV_bin==1].dropna().index
-    for idx, lag in enumerate(ex['lags']):
+    for idx, lag in enumerate(lags_i):
         
         events_min_lag = find_precursors.func_dates_min_lag(events, lag)[1]
         np_data[idx] = precur.sel(time=events_min_lag).mean(dim='time')          
@@ -358,7 +359,10 @@ def extract_regs_p1(precur, mask_chunks, events_min_lag, dates_train_min_lag,
                               (events_min_lag.size,lats.size*lons.size))
         comp_train_stack[i] = comp_train_n
         
+    assert ~any(np.isnan(comp_train_stack).flatten()), 'Nans in var {comp_train_stack}'
+    
     import numba # conda install -c conda-forge numba=0.43.1
+    
     
     def _make_composites(mask_chunks, comp_train_stack, iter_regions):
         
@@ -376,16 +380,17 @@ def extract_regs_p1(precur, mask_chunks, events_min_lag, dates_train_min_lag,
     
 #                threshold = np.nanpercentile(mean, 95)
 #                threshold = np.percentile(mean[~np.isnan(mean)], 95)
-                threshold = np.percentile(mean, 95)
+#                threshold = np.percentile(mean, 95)
+                threshold = sorted(mean)[int(0.95 * mean.size)]
 #                mean[np.isnan(mean)] = 0
                 idx += subset_i * mask_chunks.shape[0]
-
+#
                 iter_regions[idx] = np.abs(mean) > ( threshold )
 
             
         return iter_regions
 
-    jit_make_composites = numba.jit(nopython=True)(_make_composites)
+    jit_make_composites = numba.jit(nopython=True, parallel=True)(_make_composites)
     
     iter_regions = np.zeros( (comp_train_stack.shape[0]*len(mask_chunks), comp_train_stack[0,0].size), dtype='int8')
     iter_regions = jit_make_composites(mask_chunks, comp_train_stack, iter_regions)

@@ -34,7 +34,7 @@ def load_response_variable(ex):
                ex['RV_aggregation']))
     
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-
+    ex['hash'] = filename.split('_')[-1].split('.')[0]
     RVfullts, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
     if ex['tfreq'] != 1:
         RVfullts, dates = functions_pp.time_mean_bins(RVfullts, ex, ex['tfreq'])
@@ -99,6 +99,10 @@ def load_response_variable(ex):
     df_RV_ts = pd.DataFrame(RV_ts.values, columns=['RV_ts'],
                             index = datesRV)
     RV = class_RV.RV_class(df_RVfullts, df_RV_ts, kwrgs_events=ex['kwrgs_events'])
+    
+    ex['path_data_out']    = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
+                                  ex['hash']+'_'+ex['folder_sub_1'], 'data')
+    if os.path.isdir(ex['path_data_out']) == False: os.makedirs(ex['path_data_out'])
 
     #%%
     return RV, ex

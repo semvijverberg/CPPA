@@ -37,13 +37,14 @@ import exp_fc
 # load data 
 # =============================================================================
 
-strat_1d_CPPA_era5 = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/ran_strat10_s30/data/era5_24-09-19_07hr_lag_0.h5'
-strat_1d_CPPA_EC   = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/ran_strat10_s30/data/EC_16-09-19_19hr_lag_0.h5'
-CPPA_v_sm_10d = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_v200hpa_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.05_at0.05_subinfo/fulldata_pcA_none_ac0.05_at0.05_2019-09-20.h5'
-CPPA_sm_10d   = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.05_at0.05_subinfo/fulldata_pcA_none_ac0.05_at0.05_2019-09-24.h5'
-RGCPD_sst_sm_10d = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_sst_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.01_at0.01_subinfo/fulldata_pcA_none_ac0.01_at0.01_2019-10-04.h5'
-n_boot = 2000
-verbosity = 0
+strat_1d_CPPA_era5 = '/Users/semvijverberg/surfdrive/McKinRepl/era5_t2mmax_sst_Northern/Xzkup1_ran_strat10_s30/data/era5_18-01-20_11hr_lag_10.h5'
+#strat_1d_CPPA_era5 = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/ran_strat10_s30/data/era5_24-09-19_07hr_lag_0.h5'
+#strat_1d_CPPA_EC   = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/ran_strat10_s30/data/EC_16-09-19_19hr_lag_0.h5'
+#CPPA_v_sm_10d = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_v200hpa_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.05_at0.05_subinfo/fulldata_pcA_none_ac0.05_at0.05_2019-09-20.h5'
+#CPPA_sm_10d   = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.05_at0.05_subinfo/fulldata_pcA_none_ac0.05_at0.05_2019-09-24.h5'
+#RGCPD_sst_sm_10d = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_sst_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.01_at0.01_subinfo/fulldata_pcA_none_ac0.01_at0.01_2019-10-04.h5'
+n_boot = 1
+verbosity = 1
 
 
 
@@ -169,16 +170,19 @@ for freq in frequencies:
             
         df_data  = func_fc.load_hdf5(path_data)['df_data']
         df_data_train = df_data.loc[fold][df_data.loc[fold]['TrainIsTrue'].values]
-        df_data_train, dates = functions_pp.time_mean_bins(df_data_train, to_freq=freq, start_end_date=None, start_end_year=None, seldays='all', verb=0)
+        df_data_train, dates = functions_pp.time_mean_bins(df_data_train, 
+                                                           to_freq=freq, 
+                                                           start_end_date=None, 
+                                                           start_end_year=None, 
+                                                           verbosity=0)
         
         
         # insert fake train test split to make RV
         df_data_train = pd.concat([df_data_train], axis=0, keys=[0]) 
-        RV = func_fc.df_data_to_RV(df_data_train, kwrgs_exp=kwrgs_exp, kwrgs_events=kwrgs_events)
+        RV = func_fc.df_data_to_RV(df_data_train, kwrgs_events=kwrgs_events)
         df_data_train = df_data_train.loc[0][df_data_train.loc[0]['TrainIsTrue'].values]
         df_data_train = df_data_train.drop(['TrainIsTrue', 'RV_mask'], axis=1)
         # create CV inside training set
-
         df_splits = functions_pp.rand_traintest_years(RV, method=method,
                                                       seed=seed, 
                                                       kwrgs_events=kwrgs_events_, 
@@ -208,11 +212,17 @@ for freq in frequencies:
             lags_t.append((lags_i[0]-1) * tfreq + tfreq/2)
 
         
-        dict_sum = func_fc.forecast_wrapper(df_data, kwrgs_exp=kwrgs_exp, kwrgs_events=kwrgs_events, 
-                                stat_model_l=stat_model_l, 
-                                lags_i=lags_i, n_boot=n_boot)
-    
-        dict_experiments[freq] = dict_sum
+        fc.fit_models(stat_model_l=stat_model_l, lead_max=45, 
+                   keys_d=None, kwrgs_pp={})
+        
+#        dict_sum = func_fc.forecast_wrapper(df_data, kwrgs_exp=kwrgs_exp, kwrgs_events=kwrgs_events, 
+#                                stat_model_l=stat_model_l, 
+#                                lags_i=lags_i, n_boot=n_boot)
+     
+        fc.perform_validation(n_boot=100, blocksize='auto', 
+                                      threshold_pred='upper_clim')
+
+        dict_experiments[freq] = fc.dict_sum
     
 df_valid, RV, y_pred = dict_sum[stat_model_l[-1][0]]
 

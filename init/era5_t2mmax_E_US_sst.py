@@ -114,14 +114,12 @@ def __init__():
                           ex['region'])
     ex['path_fig'] = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
                                   ex['folder_sub_1'], 'figures')
-    ex['path_data_out']    = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
-                                  ex['folder_sub_1'], 'data')
+
     if os.path.isdir(ex['path_fig']) == False: os.makedirs(ex['path_fig'])
     ex['fig_path'] = ex['path_fig']
 
 #    ex['exp_folder'] = sub_output  + '/figures/' 
 
-    if os.path.isdir(ex['path_data_out']) == False: os.makedirs(ex['path_data_out'])
     
     #%%
     return ex

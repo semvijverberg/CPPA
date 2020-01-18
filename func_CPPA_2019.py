@@ -64,7 +64,7 @@ mpl.rcParams['figure.titlesize'] = 'medium'
 
 
 
-def get_robust_precursors(precur_arr, RV, df_splits, lags_i=np.array([1])):
+def get_robust_precursors(precur_arr, RV, df_splits, ex):
     #%%
 #    v = ncdf ; V = array ; RV.RV_ts = ts of RV, time_range_all = index range of whole ts
     """
@@ -79,15 +79,16 @@ def get_robust_precursors(precur_arr, RV, df_splits, lags_i=np.array([1])):
     alpha: significance level
 
     """
- 
+
+    lags = np.array(ex['lags'], dtype=int)   
 
     n_spl = df_splits.index.levels[0].size
     # make new xarray to store results
     xrcorr = precur_arr.isel(time=0).drop('time').copy()
-    # add     
-    list_xr = [xrcorr.expand_dims('lag', axis=0) for i in range(lags_i.size)]
+    # add lags
+    list_xr = [xrcorr.expand_dims('lag', axis=0) for i in range(lags.size)]
     xrcorr = xr.concat(list_xr, dim = 'lag')
-    xrcorr['lag'] = ('lag', lags_i)
+    xrcorr['lag'] = ('lag', lags)
     # add train test split     
     list_xr = [xrcorr.expand_dims('split', axis=0) for i in range(n_spl)]
     xrcorr = xr.concat(list_xr, dim = 'split')           

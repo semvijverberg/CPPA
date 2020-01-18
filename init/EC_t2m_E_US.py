@@ -15,7 +15,7 @@ Created on Tue May 21 11:07:55 2019
 """
 
 import os
-
+import numpy as np
 
 if os.path.isdir("/Users/semvijverberg/surfdrive/"):
     basepath = "/Users/semvijverberg/surfdrive/"
@@ -49,63 +49,77 @@ def __init__():
          'input_freq'   :       'daily',
          'startperiod'  :       '06-24', #'1982-06-24',
          'endperiod'    :       '08-22', #'1982-08-22',
+         'sstartdate'   :       '01-01', # precursor period
+         'senddate'     :       '09-30', # precursor period
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
          'RVts_filename':       "EC_tas_2000-2159_averAggljacc1.125d_tf1_n4__to_tas_tf1_selclus2.npy", 
          'RV_name'      :       'tas',
          'name'         :       'tos',
-         'add_lsm'      :       True,
+         'add_lsm'      :       False,
          'region'       :       'Northern',
-         'lags'         :       [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75], # [0, 10, 20, 30], 
+         'lags'         :       np.array([0, 10, 20, 35, 50, 65]), # [0, 10, 20, 30], 
          'plot_ts'      :       True,
-         'exclude_yrs'  :       []
+         'exclude_yrs'  :       [],
+         'verbosity'    :       1,         
          }
     # =============================================================================
     # Settings for event timeseries
     # =============================================================================
     ex['tfreq']                 =       1 
-    ex['max_break']             =       0   
-    ex['min_dur']               =       1
-    ex['event_percentile']      =       95
+    ex['kwrgs_events']          =   { 'event_percentile':'std',
+                                      'max_break' : 0,
+                                      'min_dur'   : 1,
+                                      'grouped'   : False }
     ex['RV_aggregation']        =       'RVfullts95'
     # =============================================================================
     # Settins for precursor / CPPA
     # =============================================================================
     if ex['add_lsm'] == True:
-        ex['path_mask'] = ex['path_raw']
+        ex['path_mask'] = path_raw
         ex['mask_file'] = 'EC_earth2.3_LSM_T159.nc'
-    ex['filename_precur']   =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
-                                            ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
+        
+    ex['filename_precur']   =       'sst_2000-2159_with_lsm.nc'
 
-    
+    ex['selbox'] 				=  {'lo_min':	-180, 'lo_max':360, 'la_min':-10, 'la_max':80}
+    # =============================================================================
+    # settings precursor region selection
+    # =============================================================================   
+    ex['distance_eps'] = 500 # proportional to km apart from a core sample, standard = 1000 km
+    ex['min_area_in_degrees2'] = 5 # minimal size to become precursor region (core sample)
+    ex['group_split'] = 'together' # choose 'together' or 'seperate'    
         
         
     ex['rollingmean']           =       ('RV', 1)
-    ex['extra_wght_dur']        =       False
-    ex['prec_reg_max_d']        =       1
     ex['SCM_percentile_thres']  =       95
     ex['FCP_thres']             =       0.85
-    ex['min_area_in_degrees2']  =       3
-    ex['distance_eps_init']     =       275 # km apart from cores sample, standard = 300
-    ex['wghts_accross_lags']    =       False
     ex['perc_yrs_out']          =       [10, 20, 30, 40] #[7.5,10,12.5,15]  
-    ex['days_before']           =       [0, 7]
+    ex['days_before']           =       [0, 7, 14]
     ex['store_timeseries']      =       False
     # =============================================================================
     # Settings for validation     
     # =============================================================================
-    ex['seed']                  =       30
-    ex['leave_n_out']           =       True
-    ex['ROC_leave_n_out']       =       False
-    ex['method']                =       'random10fold' #'iter' or 'no_train_test_split' or split#8 or random3  
-    ex['n_boot']                =       10000
+    ex['method'] = 'ran_strat10' ; ex['seed'] = 30 
+    
+    # settings for output
+    ex['folder_sub_1'] = f"{ex['method']}_s{ex['seed']}"
+    ex['params'] = ''
+    ex['file_type2'] = 'png'
     
     if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
         ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 
-    ex['exppathbase'] = '{}_{}_{}_{}'.format(ex['datafolder'], ex['RV_name'],ex['name'],
+    ex['folder_sub_0'] = '{}_{}_{}_{}'.format(ex['datafolder'], ex['RV_name'],ex['name'],
                           ex['region'])
-    ex['figpathbase'] = os.path.join(ex['figpathbase'], ex['exppathbase'])
-    if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
+    ex['path_fig'] = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
+                                  ex['folder_sub_1'], 'figures')
+    ex['path_data_out']    = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
+                                  ex['folder_sub_1'], 'data')
+    if os.path.isdir(ex['path_fig']) == False: os.makedirs(ex['path_fig'])
+    ex['fig_path'] = ex['path_fig']
+
+#    ex['exp_folder'] = sub_output  + '/figures/' 
+
+    if os.path.isdir(ex['path_data_out']) == False: os.makedirs(ex['path_data_out'])
     return ex
 
 

@@ -7,6 +7,8 @@ Created on Tue May 21 11:07:55 2019
 """
 
 import os
+import numpy as np
+import datetime
 
 
 if os.path.isdir("/Users/semvijverberg/surfdrive/"):
@@ -31,6 +33,7 @@ if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 # General Settings
 # =============================================================================
 def __init__():
+    #%%
     ex = {'datafolder'  :       datafolder,
           'grid_res'    :       1.0,
          'startyear'    :       1979,
@@ -38,14 +41,16 @@ def __init__():
          'path_pp'      :       path_pp,
          'startperiod'  :       '06-24', #'1982-06-24',
          'endperiod'    :       '08-22', #'1982-08-22',
+         'sstartdate'   :       '01-01', # precursor period
+         'senddate'     :       '09-30', # precursor period
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
          'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-         'RVts_filename':       "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_new.npy", 
+         'RVts_filename':       'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19.npy', 
          'RV_name'      :       't2mmax',
          'name'         :       'sst',
          'add_lsm'      :       False,
          'region'       :       'Northern',
-         'lags'         :       [0, 10, 20, 35, 50, 65], #[0, 10, 20, 35, 50, 65]
+         'lags'         :       np.array([0, 10, 20, 35, 50, 65]), #[0, 10, 20, 35, 50, 65]
          'plot_ts'      :       True,
          'exclude_yrs'  :       [],
          'verbosity'    :       1,
@@ -64,9 +69,10 @@ def __init__():
     # Settins for precursor / CPPA
     # =============================================================================
 
-    ex['filename_precur']   =       '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
-                                            ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
+    ex['filename_precur']   	=  '{}_{}-{}_1jan_31dec_daily_{}deg.nc'.format(
+                                    ex['name'], ex['startyear'], ex['endyear'], ex['grid_res'])
 
+    ex['selbox'] 				=  {'lo_min':	-180, 'lo_max':360, 'la_min':-10, 'la_max':80}
     
         
         
@@ -97,14 +103,25 @@ def __init__():
     # (5) no_train_test_split
     
     ex['method'] = 'ran_strat10' ; ex['seed'] = 30 
-    ex['fig_path'] = f"{ex['method']}_s{ex['seed']}"
+    # settings for output
+    ex['folder_sub_1'] = f"{ex['method']}_s{ex['seed']}"
     ex['params'] = ''
     ex['file_type2'] = 'png'
     
     if ex['RVts_filename'].split('_')[1] == "spclus4of4" and ex['RV_name'][-1]=='S':
         ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 
-    ex['exppathbase'] = '{}_{}_{}_{}'.format(ex['datafolder'], ex['RV_name'],ex['name'],
+    ex['folder_sub_0'] = '{}_{}_{}_{}'.format(ex['datafolder'], ex['RV_name'],ex['name'],
                           ex['region'])
-    ex['figpathbase'] = os.path.join(ex['figpathbase'], ex['exppathbase'])
-    if os.path.isdir(ex['figpathbase']) == False: os.makedirs(ex['figpathbase'])
+    ex['path_fig'] = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
+                                  ex['folder_sub_1'], 'figures')
+    ex['path_data_out']    = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
+                                  ex['folder_sub_1'], 'data')
+    if os.path.isdir(ex['path_fig']) == False: os.makedirs(ex['path_fig'])
+    ex['fig_path'] = ex['path_fig']
+
+#    ex['exp_folder'] = sub_output  + '/figures/' 
+
+    if os.path.isdir(ex['path_data_out']) == False: os.makedirs(ex['path_data_out'])
+    
+    #%%
     return ex

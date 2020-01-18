@@ -23,7 +23,7 @@ else:
     data_base_path = "/p/projects/gotham/semvij"
 os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
-RGCPD_dir  = os.path.join(script_dir, 'RGCPD/RGCPD')
+RGCPD_dir  = '/Users/semvijverberg/surfdrive/Scripts/RGCPD/RGCPD'
 if script_dir not in sys.path: sys.path.append(script_dir)
 if RGCPD_dir not in sys.path: sys.path.append(RGCPD_dir)
 if sys.version[:1] == '3':
@@ -33,12 +33,15 @@ import cartopy.crs as ccrs
 import numpy as np
 import xarray as xr 
 import pandas as pd
+import datetime
 import matplotlib.pyplot as plt
 import func_CPPA
 import functions_pp
 import load_data
-import functions_RGCPD as rgcpd
+import find_precursors
 import plot_maps
+import climate_indices
+
 
 xarray_plot = func_CPPA.xarray_plot
 xrplot = func_CPPA.xarray_plot
@@ -65,13 +68,14 @@ ex = settings.__init__()
 # load data (write your own function load_data(ex) )
 # =============================================================================
 RV, ex = load_data.load_response_variable(ex)
+
 precur_arr, ex = load_data.load_precursor(ex)
 
 print_ex = ['RV_name', 'name', 'kwrgs_events',
-            'event_thres', 'extra_wght_dur',
+            'event_thres', 
             'grid_res', 'startyear', 'endyear', 
             'startperiod', 'endperiod', 
-            'n_oneyr', 'wghts_accross_lags', 'add_lsm',
+            'n_oneyr', 'add_lsm',
             'tfreq', 'lags', 'n_yrs', 'region',
             'rollingmean', 'seed',
             'SCM_percentile_thres', 'FCP_thres', 'perc_yrs_out', 'days_before',
@@ -102,493 +106,516 @@ ex['n'] = n ; lag=0
 # =============================================================================
 # Run code with ex settings
 # =============================================================================
-#ex['lags'] = [0]; ex['method'] = 'no_train_test_split' ; 
-traintest, ex = functions_pp.rand_traintest_years(RV, precur_arr, ex)
+#ex['lags'] = np.array([0]) ; ex['method'] = 'no_train_test_split' ; 
+today = datetime.datetime.today().strftime("%d-%m-%y_%Hhr")
+traintest = functions_pp.rand_traintest_years(RV, method=ex['method'], 
+                                                  seed=ex['seed'], 
+                                                  kwrgs_events=ex['kwrgs_events'])
 CPPA_prec = func_CPPA.get_robust_precursors(precur_arr, RV, traintest, ex)
 actor = func_CPPA.act('sst', CPPA_prec, precur_arr)
-actor, ex = rgcpd.cluster_DBSCAN_regions(actor, ex)
+actor, ex = find_precursors.cluster_DBSCAN_regions(actor, ex)
+CPPA_prec['prec_labels'] = actor.prec_labels
 if np.isnan(actor.prec_labels.values).all() == False:
-    rgcpd.plot_regs_xarray(actor.prec_labels.copy(), ex)
+    find_precursors.plot_regs_xarray(actor.prec_labels.copy(), ex)
+actor.ts_corr = find_precursors.spatial_mean_regions(actor, ex)    
+# get PEP
+PEP_xr = func_CPPA.get_PEP(precur_arr, RV, traintest, ex)
+
+ds = xr.Dataset({'sst' : CPPA_prec, 'PEP' : PEP_xr})
+fname = '{}_{}_output.nc'.format(ex['datafolder'], today)
+ds.to_netcdf(os.path.join(ex['path_data_out'], fname))                   
+dict_ds = {'sst' : ds}  
+
+
+
+
+#def store_data(dict_ds, actor, ex):
+    
+    
+#               'PEP' : xr.Dataset({'sst' : PEP_xr}) }
+    
+
+    
+def ts_lag(actor, lag):
+    n_spl = actor.ts_corr.shape[0]
+    df_ts_s = np.zeros( (n_spl) , dtype=object)
+    
+    for s in range(n_spl):
+        all_keys = actor.ts_corr[s].columns
+        cols = [k for k in all_keys if int(k.split('_')[0]) == lag]
+        df_ts_s[s] = actor.ts_corr[s][cols]
+    df_ts = pd.concat(list(df_ts_s), keys= range(n_spl))
+    return df_ts
+
+def add_spactov(dict_ds, lag, df_data_ts, actor):
+    n_spl =df_data_ts.index.levels[0].size
+    df_sp_s   = np.zeros( (n_spl) , dtype=object)
+    outdic_actors = {'sst' : actor}
+    for s in range(n_spl):
+        df_split = df_data_ts.loc[s]
+        all_cols = list(actor.ts_corr[0].columns)
+        cols = [col for col in all_cols if int(col.split('_')[0]) == lag]
+        [cols.append(k) for k in ['TrainIsTrue', 'RV_mask'] ]
+        df_split_lag = df_split[cols]
+        df_sp_s[s] = func_CPPA.get_spatcovs(dict_ds, df_split_lag, s, lag, outdic_actors, normalize=False)
+    df_sp = pd.concat(list(df_sp_s), keys= range(n_spl))
+    return df_sp.merge(df_data_ts, left_index=True, right_index=True)
+
+def add_RV(df_data_lag, RV):
+    n_spl = df_data_lag.index.levels[0].size
+    df_RV_s   = np.zeros( (n_spl) , dtype=object)
+    for s in range(n_spl):
+        df_RV_s[s] = pd.DataFrame(RV.RVfullts.values, 
+                                columns=[ex['RV_name']],
+                                index=df_data_lag.loc[0].index)
+    df_RV = pd.concat(list(df_RV_s), keys= range(n_spl))
+    return df_RV.merge(df_data_lag, left_index=True, right_index=True)
+
+#store_data(dict_ds, actor, ex)
+
+for l, lag in enumerate(ex['lags']):
+    
+    
+    df_data_ts = ts_lag(actor, lag)
+    df_data_ts = df_data_ts.merge(traintest, left_index=True, right_index=True)
+    df_data_lag = add_spactov(dict_ds, lag, df_data_ts, actor)
+    if l == 0:
+        # PDO and ENSO do not depend on lag
+        filepath = os.path.join(ex['path_pp'], ex['filename_precur'])
+        if ex['datafolder'] == 'EC':
+            df_PDO, PDO_patterns = climate_indices.PDO_temp(actor.precur_arr, ex, traintest)            
+        else:
+            df_PDO, PDO_patterns = climate_indices.PDO(filepath, ex, traintest)
+        df_data_lag = df_PDO.merge(df_data_lag, left_index=True, right_index=True)
+        
+        df_ENSO_34  = climate_indices.ENSO_34(filepath, ex, traintest)
+    
+        df_data_lag = df_ENSO_34.merge(df_data_lag, left_index=True, right_index=True)
+    df_data_lag = add_RV(df_data_lag, RV)
+
+    
+    dict_of_dfs = {'df_data':df_data_lag}
+    fname = '{}_{}_lag_{}.h5'.format(ex['datafolder'], today, lag)
+    file_path = os.path.join(ex['path_data_out'], fname)
+    functions_pp.store_hdf_df(dict_of_dfs, file_path)
+
+#actor.ts_corr[ex['RV_name']] = pd.Series(RV.RVfullts.values, index=actor.ts_corr[0].index)
 central_lon_plots = 200
 map_proj = ccrs.LambertCylindrical(central_longitude=central_lon_plots)
 kwrgs_corr = {'clim' : (-0.5, 0.5), 'hspace':-0.6}
-plot_maps.plot_corr_maps(actor.corr_xr, actor.corr_xr['mask'].astype(bool), map_proj, kwrgs_corr)
+pdfs_folder = os.path.join(ex['path_fig'], 'pdfs')
+if os.path.isdir(pdfs_folder) != True : os.makedirs(pdfs_folder)
 
 
+f_format = '.png'
+lags_to_plot = [0, 20, 50]
+contour_mask = (CPPA_prec['prec_labels'] > 0).sel(lag=lags_to_plot).astype(bool)
+plot_maps.plot_corr_maps(CPPA_prec.sel(lag=lags_to_plot), 
+                         contour_mask, 
+                         map_proj, **kwrgs_corr)
+lags_str = str(lags_to_plot).replace(' ','').replace('[', '').replace(']','').replace(',','_')
+fig_filename = 'corr_{}_vs_{}_{}'.format(ex['RV_name'], 'sst', lags_str) + f_format
+
+if f_format == '.pdf':
+    plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+elif f_format == '.png':
+    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight')    
+
+#%%
+
+
+## =============================================================================
+## Experiment diff tfreq
+## =============================================================================
+###frequencies = np.array(np.arange(0, 140., 2.5),dtype=int) ; frequencies[0]=int(1)
+##frequencies = np.array(np.arange(0, 90., 2.5),dtype=int) ; frequencies[0]=int(1)
+##frequencies = frequencies[~np.logical_and(frequencies>=65, frequencies <70)]
+##lags_to_test = [0, 1] 
+## =============================================================================
+## Experiment best tfreq
+## =============================================================================
+#frequencies = [1]
+#lags_to_test = np.arange(0,100/frequencies[0],max(1,int(5/frequencies[0])))
+#
+##keys = ['spatcov_CPPA'] ; ext_ts = None
+##keys = ['spatcov_CPPA', '2', '3','4'] ; ext_ts = None
+#
+#keys = ['spatcov_CPPA'] 
+#ext_ts = [tuple( [os.path.join(ex['output_ts_folder'], 'sm.csv'), tuple(['sm_rm20']) ] )]
+#
+#'''     for ERA5 [2,3,4,5,6,7]
+#        East-Pac = 3
+#        CARIBEAN = 6
+#        MONSOON = 5
+#        LAKES = 2
+#        ICELAND = 7
+#        Mid-Pac = 4 
+#        '''
+#        
+#if keys != ['spatcov_CPPA']:
+#    output_dic_folder = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/different_keys/' 
+#    if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
+#else:
+#    output_dic_folder = ex['output_dic_folder']
+#
+#scores_ = ['BSS', 'BSS_low', 'BSS_high', 'AUC', 'AUC_low', 'AUC_high']
+#data=np.zeros( (len(frequencies), len(lags_to_test), len(scores_)), 
+#              dtype=float)
+#summary = xr.DataArray(data, coords=[frequencies, lags_to_test, scores_], dims=['frequency', 'lag', 'score'])
+#dict_tfreq = {}
+#for i, t in enumerate(frequencies):
+#    print('tfreq:', t)
+#    ex['tfreq'] = int(t)
+#    ex['lags'] = [l*t for l in lags_to_test]
+#    SCORE, ex = ROC_score.CV_wrapper(RV_ts, ex, path_ts, lag_to_load=lag_to_load, 
+#                                     keys=keys, ext_ts=ext_ts)
+#    dict_tfreq[t] = SCORE
+#    summary[i,:,0] = np.array(SCORE.brier_logit.loc['BSS'])
+#    summary[i,:,1] = np.array(SCORE.brier_logit.loc['BSS_high'])
+#    summary[i,:,2] = np.array(SCORE.brier_logit.loc['BSS_low'])
+#    summary[i,:,3] = np.array(SCORE.AUC_spatcov.loc['AUC'])
+#    summary[i,:,4] = np.array(SCORE.AUC_spatcov.loc['con_low'])
+#    summary[i,:,5] = np.array(SCORE.AUC_spatcov.loc['con_high'])
+##    summary[i,:,6] = np.array(SCORE.other_metrics.loc['precision']) # tp / (tp + fp)
+##    summary[i,:,7] = np.array(SCORE.other_metrics.loc['recall']) # tp / (tp + fn)
+##    summary[i,:,8] = np.array(SCORE.other_metrics.loc['FPR']) # fp / (fp + tn)
+##    summary[i,:,9] = np.array(SCORE.other_metrics.loc['f1_score']) # 2 * PREC * REC / (PREC + REC)
+##    summary[i,:,10] = np.array(SCORE.other_metrics.loc['Accuracy']) # correct pred / all preds
+#
+#precursors = '_'.join(ex['pred_names'])
+#filename_3 = 'list_tfreqs_{}_{}_lag{:.0f}-{:.0f}_trh{}_nb{}_{}'.format(frequencies[0], frequencies[-1],
+#                          lags_to_test[0],lags_to_test[-1], 
+#                          ex['event_percentile'], ex['n_boot'], precursors)
+#to_dict = dict( { 'dict_tfreq'      :   dict_tfreq,
+#                     'ex' : ex } )
+#np.save(os.path.join(output_dic_folder, filename_3+'.npy'), to_dict) 
+#
+#
+#
 ##%%
-## save ex setting in text file
-#output_dic_folder = ex['output_dic_folder']
-##if os.path.isdir(output_dic_folder):
-##    answer = input('Overwrite?\n{}\ntype y or n:\n\n'.format(output_dic_folder))
-##    if 'n' in answer:
-##        assert (os.path.isdir(output_dic_folder) != True)
-##    elif 'y' in answer:
-##        pass
 #
-#if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
+#to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
+#dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
+#frequencies = list(dict_tfreq.keys())
+#precursors = '_'.join(ex['pred_names'])
 #
-## save output in numpy dictionary
-#filename = 'output_main_dic'
-#if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
-#to_dict = dict( { 'ex'      :   ex,
-#                 'CPPA_prec' : CPPA_prec} )
-#np.save(os.path.join(output_dic_folder, filename+'.npy'), to_dict)  
-#
-## write output in textfile
-#if 'output_dic_folder' not in print_ex: print_ex.append('output_dic_folder')
-#txtfile = os.path.join(output_dic_folder, 'experiment_settings.txt')
-#with open(txtfile, "w") as text_file:
-#    max_key_len = max([len(i) for i in print_ex])
-#    for key in print_ex:
-#        key_len = len(key)
-#        expand = max_key_len - key_len
-#        key_exp = key + ' ' * expand
-#        printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
-#        print(printline, file=text_file)
-#
-#
-#
-#
-##%% 
-#RVaggr = 'RVfullts95'
-#EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-14/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-#era5T95   = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-#erai      = f'/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_{RVaggr}_rng50_2019-07-04/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-#
-#### same mask Bram
-##EC_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-06-12_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-#era5      = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-##erai      = '/Users/semvijverberg/surfdrive/MckinRepl/ERAint_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2017_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_2019-06-09_bram/lags[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75]Ev1d0p'
-#
-#
-#
-#if ex['datafolder'] == 'ERAint': output_dic_folder = erai
-#if ex['datafolder'] == 'era5': output_dic_folder = era5T95
-#if ex['datafolder'] == 'EC': output_dic_folder = EC_folder
-##    
-#    
-## =============================================================================
-## Load and Generate output in console
-## =============================================================================
-##output_dic_folder = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/random10fold_leave_16_out_2000_2159_tf1_95p_1.125deg_60nyr_95tperc_0.85tc_1rmRV_2019-05-23/lags[0,10,20,30]Ev1d0p'
-#
-#from scoringclass import SCORE_CLASS
-#filename = 'output_main_dic'
-#dic = np.load(os.path.join(output_dic_folder, filename+'.npy'),  encoding='latin1').item()
-## load settings
-#ex = dic['ex']
-## load patterns
-#try:
-#    l_ds_CPPA = dic['l_ds_CPPA']
-#except:
-#    l_ds_CPPA = dic['l_ds_PEP']
-#if 'score' in ex.keys():
-#    SCORE = ex['score']
-#
-#ex['store_timeseries'] = False
 ##%%
-#ex['grouped'] = True
-#ex['lags'] = [0, 20, 40]
-#ex['store_timeseries']  = False
-#ex['event_percentile']  = 50
-##ex['min_dur']           = 4
-##ex['max_break']         = 0
-##if ex['event_percentile'] == 'std':
-##    # binary time serie when T95 exceeds 1 std
-##    ex['event_thres'] = RV_ts.mean(dim='time').values + RV_ts.std().values
-##else:
-##    percentile = ex['event_percentile']
-##    ex['event_thres'] = np.percentile(RV_ts.values, percentile)
-##tim = func_CPPA.Ev_timeseries(RV_ts, ex['event_thres'], ex, grouped=ex['grouped'])[0].time
-##tim.size / RV_ts.size
+#
+#metric = 'BSS'
+#x = list(dict_tfreq.keys())
+#ROC_score.plot_score_freq(dict_tfreq, 'BSS', lags_to_test)
+#lags_str = str(lags_to_test).replace(' ' ,'')        
+#f_name = '{}_tfreqs_{}-{}_lag{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
+#          lags_str, ex['event_percentile'], ex['n_boot'])
+#filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
+#plt.savefig(filename, dpi=600, bbox_inches='tight')
+#plt.show()
+#
+#metric = 'AUC'
+#x = list(dict_tfreq.keys())
+#ROC_score.plot_score_freq(dict_tfreq, 'AUC', lags_to_test)
+#lags_str = str(lags_to_test).replace(' ' ,'')        
+#f_name = '{}_tfreqs_{}-{}_lag{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
+#          lags_str, ex['event_percentile'], ex['n_boot'])
+#filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
+#plt.savefig(filename, dpi=600, bbox_inches='tight')
+#plt.show()
+##%%
 #
 #
-## write output in textfile
-#if 'use_ts_logit' in ex.keys() and 'pval_logit_final' in ex.keys():
-#    predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
-#else:
-#    predict_folder = ''
-#ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
-#main_output = os.path.join(ex['figpathbase'], ex['exp_folder'])
-#if os.path.isdir(main_output) != True : os.makedirs(main_output)
-#
-#txtfile = os.path.join(main_output, 'experiment_settings.txt')
-#with open(txtfile, "w") as text_file:
-#    max_key_len = max([len(i) for i in print_ex])
-#    for key in print_ex:
-#        key_len = len(key)
-#        expand = max_key_len - key_len
-#        key_exp = key + ' ' * expand
-#        printline = '\'{}\'\t\t{}'.format(key_exp, ex[key])
-#        print(printline)
-#        print(printline, file=text_file)
-#
-## =============================================================================
-## perform prediciton        
-## =============================================================================
-#
-## write output in textfile
-#if 'use_ts_logit' in ex.keys():
-#    if ex['use_ts_logit'] == True:
-#        predict_folder = '{}{}_ts{}'.format(ex['pval_logit_final'], ex['logit_valid'], ex['use_ts_logit'])
-#else:
-#    ex['use_ts_logit'] = False
-#    predict_folder = ''
-#ex['exp_folder'] = os.path.join(ex['CPPA_folder'], predict_folder)
-#if ex['store_timeseries'] == True:
-#    
-#    if ex['method'] == 'iter' or ex['method'][:6] == 'random': 
-#        l_ds_CPPA, ex = func_CPPA.grouping_regions_similar_coords(l_ds_CPPA, ex, 
-#                         grouping = 'group_accros_tests_single_lag', eps=10)
-#        key_pattern_num = 'pat_num_CPPA_clust'
-#    else:
-#        key_pattern_num = 'pat_num_CPPA'
-#    func_CPPA.store_ts_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-#    ex = func_pred.spatial_cov(ex, key1='spatcov_CPPA')
-#    ex = ROC_score.func_AUC_wrapper(ex)
-#else:
-#    key_pattern_num = 'pat_num_CPPA'
-#    ex, SCORE = ROC_score.only_spatcov_wrapper(l_ds_CPPA, RV_ts, Prec_reg, ex)
-#    ex['score'] = SCORE
-#    filename_2 = 'output_main_dic_with_score_th{}'.format(ex['event_percentile'])
-#    to_dict = dict( { 'ex'      :   ex,
-#                     'l_ds_CPPA' : l_ds_CPPA} )
-#    np.save(os.path.join(output_dic_folder, filename_2+'.npy'), to_dict) 
-#if ex['use_ts_logit'] == False: ex.pop('use_ts_logit')
-#
-#ROC_score.create_validation_plot([output_dic_folder], metric='AUC', getPEP=False)
-#ROC_score.create_validation_plot([output_dic_folder], metric='brier', getPEP=False)
-
-#%% New scoring func
-path_ts = ex['output_ts_folder']
-ex['n_boot'] = 1000
-lag_to_load = 0
-#np.arange(0, 15+1E-9,1, dtype=int)
-
-
-ex['event_percentile'] = 'std' # 50 'std'
-# =============================================================================
-# Experiment diff tfreq
-# =============================================================================
-##frequencies = np.array(np.arange(0, 140., 2.5),dtype=int) ; frequencies[0]=int(1)
-#frequencies = np.array(np.arange(0, 90., 2.5),dtype=int) ; frequencies[0]=int(1)
-#frequencies = frequencies[~np.logical_and(frequencies>=65, frequencies <70)]
-#lags_to_test = [0, 1] 
-# =============================================================================
-# Experiment best tfreq
-# =============================================================================
-frequencies = [1]
-lags_to_test = np.arange(0,100/frequencies[0],max(1,int(5/frequencies[0])))
-
-#keys = ['spatcov_CPPA'] ; ext_ts = None
-#keys = ['spatcov_CPPA', '2', '3','4'] ; ext_ts = None
-
-keys = ['spatcov_CPPA'] 
-ext_ts = [tuple( [os.path.join(ex['output_ts_folder'], 'sm.csv'), tuple(['sm_rm20']) ] )]
-
-'''     for ERA5 [2,3,4,5,6,7]
-        East-Pac = 3
-        CARIBEAN = 6
-        MONSOON = 5
-        LAKES = 2
-        ICELAND = 7
-        Mid-Pac = 4 
-        '''
-        
-if keys != ['spatcov_CPPA']:
-    output_dic_folder = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/random10fold_leave_4_out_1979_2018_tf1_stdp_1.0deg_60nyr_95tperc_0.8tc_1rmRV_rng50_2019-06-24/different_keys/' 
-    if os.path.isdir(output_dic_folder) != True : os.makedirs(output_dic_folder)
-else:
-    output_dic_folder = ex['output_dic_folder']
-
-scores_ = ['BSS', 'BSS_low', 'BSS_high', 'AUC', 'AUC_low', 'AUC_high']
-data=np.zeros( (len(frequencies), len(lags_to_test), len(scores_)), 
-              dtype=float)
-summary = xr.DataArray(data, coords=[frequencies, lags_to_test, scores_], dims=['frequency', 'lag', 'score'])
-dict_tfreq = {}
-for i, t in enumerate(frequencies):
-    print('tfreq:', t)
-    ex['tfreq'] = int(t)
-    ex['lags'] = [l*t for l in lags_to_test]
-    SCORE, ex = ROC_score.CV_wrapper(RV_ts, ex, path_ts, lag_to_load=lag_to_load, 
-                                     keys=keys, ext_ts=ext_ts)
-    dict_tfreq[t] = SCORE
-    summary[i,:,0] = np.array(SCORE.brier_logit.loc['BSS'])
-    summary[i,:,1] = np.array(SCORE.brier_logit.loc['BSS_high'])
-    summary[i,:,2] = np.array(SCORE.brier_logit.loc['BSS_low'])
-    summary[i,:,3] = np.array(SCORE.AUC_spatcov.loc['AUC'])
-    summary[i,:,4] = np.array(SCORE.AUC_spatcov.loc['con_low'])
-    summary[i,:,5] = np.array(SCORE.AUC_spatcov.loc['con_high'])
-#    summary[i,:,6] = np.array(SCORE.other_metrics.loc['precision']) # tp / (tp + fp)
-#    summary[i,:,7] = np.array(SCORE.other_metrics.loc['recall']) # tp / (tp + fn)
-#    summary[i,:,8] = np.array(SCORE.other_metrics.loc['FPR']) # fp / (fp + tn)
-#    summary[i,:,9] = np.array(SCORE.other_metrics.loc['f1_score']) # 2 * PREC * REC / (PREC + REC)
-#    summary[i,:,10] = np.array(SCORE.other_metrics.loc['Accuracy']) # correct pred / all preds
-
-precursors = '_'.join(ex['pred_names'])
-filename_3 = 'list_tfreqs_{}_{}_lag{:.0f}-{:.0f}_trh{}_nb{}_{}'.format(frequencies[0], frequencies[-1],
-                          lags_to_test[0],lags_to_test[-1], 
-                          ex['event_percentile'], ex['n_boot'], precursors)
-to_dict = dict( { 'dict_tfreq'      :   dict_tfreq,
-                     'ex' : ex } )
-np.save(os.path.join(output_dic_folder, filename_3+'.npy'), to_dict) 
-
-
-
+##%%
+#to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
+#dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
+#f = frequencies[-1]
+#n_shuffle = 0
+##summary.loc[freq][0].to_dataframe('Summary')
+#SCORE = dict_tfreq[f]
+#df_sum = ROC_score.add_scores_wrt_random(SCORE, n_shuffle=n_shuffle)
+#f_name = '{}_lag{:.0f}-{:.0f}_tf{}_thr{}_ns{}_{}'.format('valid', SCORE._lags[0], 
+#          SCORE._lags[-1], SCORE.tfreq,
+#          ex['event_percentile'], n_shuffle, precursors)
+#df_sum.to_excel(os.path.join(output_dic_folder, f_name+ '.xlsx'))
 #%%
-
-to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
-dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
-frequencies = list(dict_tfreq.keys())
-precursors = '_'.join(ex['pred_names'])
-
-#%%
-
-metric = 'BSS'
-x = list(dict_tfreq.keys())
-ROC_score.plot_score_freq(dict_tfreq, 'BSS', lags_to_test)
-lags_str = str(lags_to_test).replace(' ' ,'')        
-f_name = '{}_tfreqs_{}-{}_lag{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
-          lags_str, ex['event_percentile'], ex['n_boot'])
-filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
-plt.savefig(filename, dpi=600, bbox_inches='tight')
-plt.show()
-
-metric = 'AUC'
-x = list(dict_tfreq.keys())
-ROC_score.plot_score_freq(dict_tfreq, 'AUC', lags_to_test)
-lags_str = str(lags_to_test).replace(' ' ,'')        
-f_name = '{}_tfreqs_{}-{}_lag{}_thr{}_nb{}.png'.format(metric, x[0], x[-1], 
-          lags_str, ex['event_percentile'], ex['n_boot'])
-filename = os.path.join(output_dic_folder, 'AUC_and_BSS', f_name)
-plt.savefig(filename, dpi=600, bbox_inches='tight')
-plt.show()
-#%%
-
-
-#%%
-to_dict = np.load(os.path.join(output_dic_folder, filename_3+'.npy'),  encoding='latin1').item()
-dict_tfreq = to_dict['dict_tfreq'] ; ex = to_dict['ex']
-f = frequencies[-1]
-n_shuffle = 0
-#summary.loc[freq][0].to_dataframe('Summary')
-SCORE = dict_tfreq[f]
-df_sum = ROC_score.add_scores_wrt_random(SCORE, n_shuffle=n_shuffle)
-f_name = '{}_lag{:.0f}-{:.0f}_tf{}_thr{}_ns{}_{}'.format('valid', SCORE._lags[0], 
-          SCORE._lags[-1], SCORE.tfreq,
-          ex['event_percentile'], n_shuffle, precursors)
-df_sum.to_excel(os.path.join(output_dic_folder, f_name+ '.xlsx'))
-
-#probs_forecast 
-lag = 50
-for t in [0.25, 0.5, 0.75]:
-    y_pred = SCORE.predmodel_2[lag]
-    print(np.percentile(y_pred.values, 100*t))
+filename = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/ran_strat10_s30/data/era5_19-09-19_12hr_output.nc'
+#filename = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/ran_strat10_s30/data/EC_16-09-19_19hr_output.nc'
+ds = xr.open_dataset(filename)    
     
-
-
-
-
-
+CPPA_prec = ds['sst']
+# LSM mask
+#LSM = np.isnan(CPPA_prec)
+#mask = (('latitude', 'longitude', LSM.values))
+#CPPA_prec['mask'] = LSM
 #%%
 # =============================================================================
 #   Plotting
 # =============================================================================
-lags_plot = [0, 10, 20, 35, 50, 65]
+central_lon_plots = 200
+map_proj = ccrs.LambertCylindrical(central_longitude=central_lon_plots)
+f_format = '.png'
+lags_plot = [0, 20, 50]
 n_splits = CPPA_prec.split.size
-ROC_str_Sem     = ['{} days'.format(ex['lags'][i]) for i in range(len(ex['lags'])) ]
-
-
 
 
     
-kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
-                    'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : ROC_str_Sem,
-                   'cmap' : plt.cm.RdBu_r, 'column' : 2} )
+mean_n_patterns = CPPA_prec.sel(lag=lags_plot).mean(dim='split')
+sig_mask = (CPPA_prec['prec_labels'] > 0).sum(dim='split')
+mean_mask       = sig_mask > 0.5 * n_splits # in more then 50% of splits
 
-mean_n_patterns = CPPA_prec.mean(dim='split')
-mean_mask       = CPPA_prec['mask'].mean(dim='split')
-mean_n_patterns = mean_n_patterns.where(l_ds_CPPA[n]['pat_num_CPPA']>0.5)
+mean_n_patterns = mean_n_patterns.where(CPPA_prec['lsm'])
 mean_n_patterns.attrs['units'] = '[K]'
 mean_n_patterns.attrs['title'] = 'CPPA - Precursor Pattern'
-try:
-    mean_n_patterns.name = 'mean_{}_traintest'.format(n_splits)
-except:
-    mean_n_patterns.name = '' 
-filename = os.path.join('', 'mean_over_{}_tests_lags{}'.format(n_splits,
-                        str(lags_plot).replace(' ' ,'')) )
-func_CPPA.plotting_wrapper(mean_n_patterns, ex, filename, kwrgs=kwrgs)
+subtitles = []
+subtitles.append(['{} days'.format(l) for l in lags_plot  ])
+subtitles = np.array(subtitles).T
+mean_n_patterns.name = 'sst_mean_{}_traintest'.format(n_splits)
 
-plot_maps.plot_corr_maps(mean_n_patterns, mean_mask, map_proj, kwrgs_corr)
 
+kwrgs_corr = {'row_dim':'lag', 'col_dim':'split', 'hspace':-0.3, 
+              'size':3, 'cbar_vert':-0.025, 'clim':(-0.4,0.4),
+              'subtitles' : subtitles, 'lat_labels':False}
+
+# mcKinnon PEP box
+west_lon = -215; east_lon = -130; south_lat = 20; north_lat = 50
+kwrgs_corr['drawbox'] = ['all', (west_lon, east_lon, south_lat, north_lat)]
+
+plot_maps.plot_corr_maps(mean_n_patterns, mean_mask, map_proj, **kwrgs_corr)
+fig_filename = os.path.join('', 'mean_over_{}_tests_lags{}'.format(n_splits,
+                        str(lags_plot).replace(' ' ,'')) ) + f_format
+
+if f_format == '.pdf':
+    plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+elif f_format == '.png':
+    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight')  
+plt.show()
 
 #%% Robustness accross training sets
-#    ex['lags'] = [5,15,30,50]
 
-lats = patterns_Sem.latitude
-lons = patterns_Sem.longitude
+f_format = '.png'
+lats = CPPA_prec.latitude
+lons = CPPA_prec.longitude
 array = np.zeros( (n_splits, len(lags_plot), len(lats), len(lons)) )
-wgts_tests = xr.DataArray(data=array, 
-                coords=[range(n_splits), lags_plot, lats, lons], 
-                dims=['n_tests', 'lag','latitude','longitude'], 
-                name='{}_tests_wghts'.format(n_splits), attrs={'units':'wghts ['})
-for n in range(n_splits):
-#    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=ex['lags'])
-    wgts_tests[n,:,:,:] = l_ds_CPPA[n]['weights'].sel(lag=lags_plot).where(l_ds_CPPA[n]['pat_num_CPPA']>0.5)
+wgts_tests = CPPA_prec['weights'].sel(lag=lags_plot).sum(dim='split')
+wgts_tests.attrs = {'units':'wghts [-]'}
+
+
     
 from matplotlib.colors import LinearSegmentedColormap 
-if ex['leave_n_out']:
-    n_lags = len(lags_plot)
-    n_lats = patterns_Sem.sel(n_tests=0).latitude.size
-    n_lons = patterns_Sem.sel(n_tests=0).longitude.size
-    
-    pers_patt = patterns_Sem.sel(n_tests=0).sel(lag=lags_plot).copy()
-#    arrpatt = np.nan_to_num(patterns_Sem.values)
-#    mask_patt = (arrpatt != 0)
-#    arrpatt[mask_patt] = 1
-    wghts = np.zeros( (n_lags, n_lats, n_lons) )
-#    plt.imshow(arrpatt[0,0]) ; plt.colorbar()
-    for l in lags_plot:
-        i = lags_plot.index(l)
-        wghts[i] = np.nansum(wgts_tests[:,i,:,:].values, axis=0)
-    pers_patt.values = wghts 
-    pers_patt = pers_patt.where(pers_patt.values != 0)
-    pers_patt -= 1E-9
-    size_trainset = ex['n_yrs'] - ex['leave_n_years_out']
-    pers_patt.attrs['units'] = 'No. of times in final pattern [0 ... {}]'.format(n_splits)
-    pers_patt.attrs['title'] = ('Robustness SST pattern\n{} different '
-                            'training sets (n={} yrs)'.format(n_splits,size_trainset))
-    filename = os.path.join('', 'Robustness_across_{}_training_tests_lags{}'.format(n_splits,
-                            str(lags_plot).replace(' ' ,'')) )
-    vmax = n_splits 
-    extend = ['min','yellow']
-    if vmax-20 <= n_splits: extend = ['min','white']
-    
-    mean = np.round(pers_patt.mean(dim=('latitude', 'longitude')).values, 1)
-    
-    std =  np.round(pers_patt.std(dim=('latitude', 'longitude')).values, 0)
-    ax_text = ['mean = {}±{}'.format(mean[l],int(std[l])) for l in range(len(lags_plot))]
-    colors = plt.cm.magma_r(np.linspace(0,0.7, 20))
-    colors[-1] = plt.cm.magma_r(np.linspace(0.99,1, 1))
-    cm = LinearSegmentedColormap.from_list('test', colors, N=255)
-    kwrgs = dict( {'title' : pers_patt.attrs['title'], 'clevels' : 'notdefault', 
-                   'steps' : 11, 'subtitles': ROC_str_Sem, 
-                   'vmin' : max(0,vmax-20), 'vmax' : vmax, 'clim' : (max(0,vmax-20), vmax),
-                   'cmap' : cm, 'column' : 2, 'extend':extend,
-                   'cbar_vert' : 0.07, 'cbar_hght' : 0.01,
-                   'adj_fig_h' : 1.25, 'adj_fig_w' : 1., 
-                   'hspace' : -0.02, 'wspace' : 0.04, 
-                   'title_h': 0.95} )
-    func_CPPA.plotting_wrapper(pers_patt, ex, filename, kwrgs=kwrgs)
 
+pers_patt = wgts_tests
+pers_patt = pers_patt.where(pers_patt.values != 0)
+pers_patt -= 1E-9
+size_trainset = int(ex['n_yrs'] - (ex['n_yrs'] / ds.split.size))
+pers_patt.attrs['units'] = 'No. of times in final pattern [0 ... {}]'.format(n_splits)
+pers_patt.attrs['title'] = ('Robustness\n{} different '
+                        'training sets (n={} yrs)'.format(n_splits,size_trainset))
+fig_filename = os.path.join('', 'Robustness_across_{}_training_tests_lags{}'.format(n_splits,
+                        str(lags_plot).replace(' ' ,'')) )
+vmax = n_splits 
+extend = ['min','yellow']
+if vmax-20 <= n_splits: extend = ['min','white']
+
+mean = np.round(pers_patt.mean(dim=('latitude', 'longitude')).values, 1)
+
+std =  np.round(pers_patt.std(dim=('latitude', 'longitude')).values, 0)
+
+ax_text = ['mean = {}±{}'.format(mean[l],int(std[l])) for l in range(len(lags_plot))]
+colors = plt.cm.magma_r(np.linspace(0,0.7, 20))
+colors[-1] = plt.cm.magma_r(np.linspace(0.99,1, 1))
+cm = LinearSegmentedColormap.from_list('test', colors, N=255)
+kwrgs = dict( {'title' : pers_patt.attrs['title'], 'clevels' : 'notdefault', 
+               'steps' : 11, 'subtitles': subtitles, 
+               'size' : 3,
+               'vmin' : max(0,vmax-20), 'vmax' : vmax, 'clim' : (max(0,vmax-20), vmax),
+               'cmap' : cm, 'column' : 1, 'extend':extend,
+               'cbar_vert' : 0.04, 'cbar_hght' : -0.01,
+               'adj_fig_h' : 1, 'adj_fig_w' : 1., 
+               'hspace' : -0.1, 'wspace' : 0.04, 
+               'title_h': 0.95} )
+func_CPPA.plotting_wrapper(pers_patt, ex, filename, kwrgs=kwrgs, map_proj=map_proj)
+
+if f_format == '.pdf':
+    plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+elif f_format == '.png':
+    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight') 
 
 
 #%% Weighing features if there are extracted every run (training set)
 # weighted by persistence of pattern over
-if ex['leave_n_out']:
-    kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
-                    'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : ROC_str_Sem,
-                   'cmap' : plt.cm.RdBu_r, 'column' : 1,
-                   'cbar_vert' : 0.04, 'cbar_hght' : -0.025,
-                   'adj_fig_h' : 0.9, 'adj_fig_w' : 1., 
-                   'hspace' : 0.2, 'wspace' : 0.08,
-                   'title_h' : 0.95} )
-    # weighted by persistence (all years == wgt of 1, less is below 1)
-    final_pattern = patterns_Sem.mean(dim='n_tests') * wghts/np.max(wghts)
-    final_pattern = mean_n_patterns.where(wghts!=0.)
-    final_pattern['lag'] = ROC_str_Sem
 
-    title = 'Precursor Pattern'
-    if final_pattern.sum().values != 0.:
-        final_pattern.attrs['units'] = 'Kelvin'
-        final_pattern.attrs['title'] = title
-                             
-        final_pattern.name = ''
-        filename = os.path.join('', ('{}_Precursor_pattern_robust_w_'
-                             '{}_tests_lags{}'.format(ex['datafolder'], n_splits,
-                              str(lags_plot).replace(' ' ,'')) ))
+kwrgs = dict( {'title' : '', 'clevels' : 'notdefault', 'steps':17,
+                'vmin' : -0.4, 'vmax' : 0.4, 'subtitles' : subtitles,
+               'cmap' : plt.cm.RdBu_r, 'column' : 1,
+               'cbar_vert' : 0.04, 'cbar_hght' : -0.01,
+               'adj_fig_h' : 1, 'adj_fig_w' : 1., 
+               'hspace' : -0.1, 'wspace' : 0.04, 
+               'title_h' : 0.95} )
+# weighted by persistence (all years == wgt of 1, less is below 1)
+final_pattern = mean_n_patterns * pers_patt/np.max(pers_patt)
+final_pattern = mean_n_patterns.where(~np.isnan(pers_patt))
+final_pattern['lag'] = subtitles
 
-        func_CPPA.plotting_wrapper(final_pattern, ex, filename, kwrgs=kwrgs)
+title = 'Precursor Pattern'
+if final_pattern.sum().values != 0.:
+    final_pattern.attrs['units'] = 'Kelvin'
+    final_pattern.attrs['title'] = title
+                         
+    final_pattern.name = ''
+    filename = os.path.join('', ('{}_Precursor_pattern_robust_w_'
+                         '{}_tests_lags{}'.format(ex['datafolder'], n_splits,
+                          str(lags_plot).replace(' ' ,'')) ))
 
-#%% Cross corr matrix
-final_pattern.coords['lag'] = lags_plot
+    func_CPPA.plotting_wrapper(final_pattern, ex, filename, kwrgs, map_proj)
+    if f_format == '.pdf':
+        plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+    elif f_format == '.png':
+        plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight') 
+
+#%% plot precursor regions
+f_format = '.png'
+dpi = 300
+lags_to_plot = [0, 20, 50]
+prec_labels = CPPA_prec['prec_labels'].sel(lag=lags_to_plot)
+
+# colors of cmap are dived over min to max in n_steps. 
+# We need to make sure that the maximum value in all dimensions will be 
+# used for each plot (otherwise it assign inconsistent colors)
+max_N_regs = min(20, int(prec_labels.max() + 0.5))
+label_weak = np.nan_to_num(prec_labels.values) >=  max_N_regs
+contour_mask = None
+prec_labels.values[label_weak] = max_N_regs
+steps = max_N_regs+1
+cmap = plt.cm.tab20
+prec_labels.values = prec_labels.values-0.5
+clevels = np.linspace(0, max_N_regs,steps)
+
+kwrgs_corr = {'row_dim':'split', 'col_dim':'lag', 'hspace':-0.35, 
+              'size':3, 'cbar_vert':-0.025, 'clevels':clevels,
+              'subtitles' : None, 'lat_labels':True, 
+              'cticks_center':True,
+              'cmap':cmap}        
 
 
-#%% Robustness of training precursor regions
 
-subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
-total_folder = os.path.join(ex['figpathbase'], subfolder)
-if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-years = range(ex['startyear'], ex['endyear'])
+plot_maps.plot_corr_maps(prec_labels, 
+                 contour_mask, 
+                 map_proj, **kwrgs_corr)
 
-#n_land = np.sum(np.array(np.isnan(Prec_reg.values[0]),dtype=int) )
-#n_sea = Prec_reg[0].size - n_land
-if ex['method'] == 'iter':
-    sorted_idx = np.argsort(ex['n_events'])
-    sorted_n_events = ex['n_events'].copy(); sorted_n_events.sort()
-    test_set_to_plot = [ex['tested_yrs'][n][0] for n in sorted_idx[:6]]
-    [test_set_to_plot.append(ex['tested_yrs'][n][0]) for n in sorted_idx[-5:]]
-elif ex['method'][:6] == 'random':
-    test_set_to_plot = [set(t[1]['RV'].time.dt.year.values) for t in ex['train_test_list'][::5]]
-elif ex['method'][:] == 'no_train_test_split':
-    test_set_to_plot = ['None']
-#test_set_to_plot = list(np.arange(0,n_splits,5))
-for yr in test_set_to_plot: 
-    n = test_set_to_plot.index(yr)
-    Robustness_weights = l_ds_CPPA[n]['weights'].sel(lag=lags_plot)
-    size_trainset = ex['n_yrs'] - ex['leave_n_years_out']
-    Robustness_weights.attrs['title'] = ('Robustness\n test yr(s): {}, single '
-                            'training set (n={} yrs)'.format(yr,size_trainset))
-    Robustness_weights.attrs['units'] = 'Weights [{} ... 1]'.format(ex['FCP_thres'])
-    filename = os.path.join('', Robustness_weights.attrs['title'].replace(
-                            ' ','_')+'.png')
-    for_plt = Robustness_weights.where(Robustness_weights.values != 0).copy()
-#    n_pattern = Prec_reg[0].size - np.sum(np.array(np.isnan(for_plt[0]),dtype=int))
+lags_str = str(lags_to_plot).replace(' ','').replace('[', '').replace(']','').replace(',','_')
+fig_filename = 'labels_{}_vs_{}_{}'.format(ex['RV_name'], 'sst', lags_str) + f_format
+
+if f_format == '.pdf':
+    plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+elif f_format == '.png':
+    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight', dpi=dpi)    
+
     
-    if n_splits == 1:
-        steps = 19
-    else:
-        steps = 11
-    kwrgs = dict( {'title' : for_plt.attrs['title'], 'clevels' : 'notdefault', 
-                   'steps' : 11, 'subtitles': ROC_str_Sem, 
-                   'vmin' : ex['FCP_thres'], 'vmax' : for_plt.max().values+1E-9, 
-                   'cmap' : plt.cm.viridis_r, 'column' : 2,
-                   'cbar_vert' : 0.05, 'cbar_hght' : 0.01,
-                   'adj_fig_h' : 1.25, 'adj_fig_w' : 1., 
-                   'hspace' : 0.02, 'wspace' : 0.08} )
-    
-    func_CPPA.plotting_wrapper(for_plt, ex, filename, kwrgs=kwrgs)
-    
-#%%
+#%% plot ENSO / PDO maps
+path_fig = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/ran_strat10_s30/figures'
+path_data = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.05_at0.05_subinfo/fulldata_pcA_none_ac0.05_at0.05_2019-09-24.h5'
+df_ENSO_34 = func_fc.load_hdf5(path_data)['df_data'].loc[0]['0_900_ENSO34']
+dt = (df_ENSO_34.index[1] - df_ENSO_34.index[0]).days
+ENSO_5_months = int((5 * 30) / dt)
+PDO = PDO_patterns.mean(dim='split')
+ENSO_ts = df_ENSO_34.rolling(window=ENSO_5_months, min_periods=1).mean() #5month rm
+ENSO_d = ENSO_ts[(ENSO_ts > 0.4).values].index
+ENSO = precur_arr.sel(time=ENSO_d).mean(dim='time')
 
-filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-dicRV = np.load(filename,  encoding='latin1').item()
-folder = os.path.join(ex['figpathbase'], ex['exp_folder'])
-if 'mask' in ex.keys():
-    xarray_plot(ex['mask'], path=folder, name='RV_mask', saving=True)
+map_proj = ccrs.PlateCarree(central_longitude=220)
+
+class MidpointNormalize(colors.Normalize):
+            def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
+                self.midpoint = midpoint
+                colors.Normalize.__init__(self, vmin, vmax, clip)
     
-func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=True)
+            def __call__(self, value, clip=None):
+                # I'm ignoring masked values and all kinds of edge cases to make a
+                # simple example...
+                x, y = [self.vmin, self.midpoint, self.vmax], [0, 0.5, 1]
+                return np.ma.masked_array(np.interp(value, x, y))
+            
+fig = plt.figure(figsize=(20,10) )
+ax1 = plt.subplot(1, 2, 1, projection=map_proj) 
+#ax.set_xlim(-130, -65)
+ax1.set_ylim(-10, 80)
+colormap = plt.cm.coolwarm
+vmin = -0.8; vmax=0.8
+clevels = np.arange(-0.8, 0.8+1E-9, 0.2)
+clevels = np.linspace(-0.8, 0.8, 17)
+norm = MidpointNormalize(midpoint=0, vmin=clevels[0],vmax=clevels[-1])
+
+im = ENSO.plot.contourf(ax=ax1, transform=ccrs.PlateCarree(), 
+                          subplot_kws={'projection': map_proj},
+                          cmap=colormap, center=0,
+                          clevels=clevels, 
+                          vmin=vmin, vmax=vmax, add_colorbar=False)
+fontdict = dict({'fontsize'     : 18,
+             'fontweight'   : 'bold'})
+ax1.set_title('El Nino', fontdict=fontdict, loc='center')
+ax1.coastlines()
+
+
+ax2 = plt.subplot(1, 2, 2, projection=map_proj) 
+ax2.set_ylim(20, 65)
+
+PDO.plot.contourf(ax=ax2, transform=ccrs.PlateCarree(), 
+                          subplot_kws={'projection': map_proj},
+                          cmap=im.cmap, center=0,
+                          clevels=clevels,
+                          vmin=vmin, vmax=vmax, add_colorbar=False)
+ax2.coastlines()
+
+ax2.set_title('PDO pattern (positive phase)', fontdict=fontdict, loc='center')
+cbar_ax = fig.add_axes([0.25, 0.35, 0.5, 0.02])
+                              
+plt.colorbar(im, cax=cbar_ax , orientation='horizontal', norm=norm,
+                 label='[K]', ticks=clevels[::8], extend='neither')    
+fig_filename = 'ENSO_PDO_patterns' + f_format
+
+if f_format == '.pdf':
+    plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+elif f_format == '.png':
+    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight', dpi=dpi)  
+
+#filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
+#dicRV = np.load(filename,  encoding='latin1').item()
+#folder = os.path.join(ex['figpathbase'], ex['exp_folder'])
+#if 'mask' in ex.keys():
+#    xarray_plot(ex['mask'], path=folder, name='RV_mask', saving=True)
+#    
+#func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=True)
 ## plotting same figure as in paper
 #for i in range(2005, 2010):
 #    func_CPPA.plot_oneyr_events(RV_ts, ex, i, folder, saving=True)
 
-#%% Plotting prediciton time series vs truth:
-
-#yrs_to_plot = [1983, 1988, 1994, 2002, 2007, 2012, 2015]
-ex['n_events'] = []
-all_years = np.unique(SCORE.y_true_test.index.year)
-for y in all_years:
-    n_ev = int(SCORE.y_true_test[0][SCORE.y_true_test[0].index.year==y].sum())
-    ex['n_events'].append(n_ev)
-if 'n_events' in ex.keys():
-    sorted_idx = np.argsort(ex['n_events'])
-    sorted_n_events = ex['n_events'].copy(); sorted_n_events.sort()
-    yrs_to_plot = [all_years[n] for n in sorted_idx[:6]]
-    [yrs_to_plot.append(all_years[n]) for n in sorted_idx[-5:]]
-
-#    test = ex['train_test_list'][0][1]        
-plotting_timeseries(SCORE, 'spatcov', yrs_to_plot, ex) 
-plotting_timeseries(SCORE, 'logit', yrs_to_plot, ex) 
+##%% Plotting prediciton time series vs truth:
+#
+##yrs_to_plot = [1983, 1988, 1994, 2002, 2007, 2012, 2015]
+#ex['n_events'] = []
+#all_years = np.unique(SCORE.y_true_test.index.year)
+#for y in all_years:
+#    n_ev = int(SCORE.y_true_test[0][SCORE.y_true_test[0].index.year==y].sum())
+#    ex['n_events'].append(n_ev)
+#if 'n_events' in ex.keys():
+#    sorted_idx = np.argsort(ex['n_events'])
+#    sorted_n_events = ex['n_events'].copy(); sorted_n_events.sort()
+#    yrs_to_plot = [all_years[n] for n in sorted_idx[:6]]
+#    [yrs_to_plot.append(all_years[n]) for n in sorted_idx[-5:]]
+#
+##    test = ex['train_test_list'][0][1]        
+#plotting_timeseries(SCORE, 'spatcov', yrs_to_plot, ex) 
+#plotting_timeseries(SCORE, 'logit', yrs_to_plot, ex) 
 
 #%%    
 from sklearn.metrics import brier_score_loss
@@ -603,56 +630,86 @@ for p in np.linspace(0, 1, 19):
 plt.plot(np.linspace(0, 1, 19), rand_scores)
 
 #%% plot frequency
-import matplotlib 
-matplotlib.rc('xtick', labelsize=15) 
-matplotlib.rc('ytick', labelsize=15) 
-datesRV = pd.to_datetime(SCORE.y_true_test[0].index)
-freq = pd.DataFrame(data= np.zeros(len(ex['all_yrs'])), index = ex['all_yrs'], columns=['freq'])
-for i, yr in enumerate(ex['all_yrs']):
-    oneyr = SCORE.y_true_test[0].loc[func_CPPA.get_oneyr(datesRV, yr)]
-    freq.loc[yr] = oneyr.sum()
-plt.figure( figsize=(8,6) )
-plt.bar(freq.index, freq['freq'])
-plt.ylabel('freq. hot days', fontdict={'fontsize':14})
+import validation as valid
+import valid_plots as dfplots
+valid.plot_freq_per_yr(RV)
 
 fname = 'freq_per_year.png'
-filename = os.path.join(output_dic_folder, fname)
-plt.savefig(filename, dpi=600) 
+filename = os.path.join(ex['fig_path'], fname)
+plt.savefig(filename) 
+
+#%% get timeseries:
+
+ERA5_filename = 'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19.npy'
+GHCND_filename = "PEP-T95TimeSeries.txt"
 
 
-#%% Initial regions from only composite extraction:
-key_pattern_num = 'pat_num_CPPA_clust'
-lags_plot = [0, 5, 10, 15, 20, 25]
-lags = lags_plot
-if ex['leave_n_out']:
-    subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
-    total_folder = os.path.join(ex['figpathbase'], subfolder)
-    if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-    if 'ROC_str_Sem' in globals():
-        subtitles = [ROC_str_Sem[lags_plot.index(l)] for l in lags]
-    else:
-        subtitles = ['{} days'.format(lags_plot[i]) for i in range(len(lags_plot)) ]
-    
-        
-    func_CPPA.plot_precursor_regions(l_ds_CPPA, n_splits, key_pattern_num, lags, subtitles, ex)
+RV, ex = load_data.load_response_variable(ex)
+T95_ERA5 = RV.RV_ts
+T95_GHCND, GHCND_dates = load_data.read_T95(GHCND_filename, ex)
+dates = functions_pp.get_oneyr(RV.dates_RV, 2012)
+shared_dates = functions_pp.get_oneyr(RV.dates_RV, *list(range(1982, 2016)))
 #%%
-lags_plot = [30, 35, 40, 50, 60]    
-lags = lags_plot
-if ex['leave_n_out']:
-    subfolder = os.path.join(ex['exp_folder'], 'intermediate_results')
-    total_folder = os.path.join(ex['figpathbase'], subfolder)
-    if os.path.isdir(total_folder) != True : os.makedirs(total_folder)
-    if 'ROC_str_Sem' in globals():
-        subtitles = [ROC_str_Sem[lags_plot.index(l)] for l in lags]
-    else:
-        subtitles = ['{} days'.format(lags_plot[i]) for i in range(len(lags_plot)) ]
-    
-        
-    func_CPPA.plot_precursor_regions(l_ds_CPPA, n_splits, key_pattern_num, lags, subtitles, ex)
+data = np.stack([T95_GHCND.sel(time=shared_dates).values, T95_ERA5.loc[shared_dates].values.squeeze()], axis=1)
+df = pd.DataFrame(data, columns=['GHCND', 'ERA-5'], index=shared_dates)
 
-#%% cross correlation plots
-df = ROC_score.get_ts_matrix(Prec_reg, final_pattern, ex, lag=0)
-ROC_score.build_matrix_wrapper(df, ex, lag=[0], wins=[1, 20, 30, 60, 80, 100, 365])
+dfplots.plot_oneyr_events(df, 'std', 2012)
+plt.savefig(os.path.join(ex['path_fig'], 'timeseries_ERA5_GHCND.png'),
+            bbox_inches='tight')
+#%% Keep forecast the same, change event definition
+import func_fc
+import validation as valid
+import classes
+import pandas as pd
+
+path_fig = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/ran_strat10_s30/figures'
+path_data = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.05_at0.05_subinfo/fulldata_pcA_none_ac0.05_at0.05_2019-09-24.h5'
+df_data = func_fc.load_hdf5(path_data)['df_data']
+splits  = df_data.index.levels[0]
+RVfullts = pd.DataFrame(df_data[df_data.columns[0]][0])
+RV_ts    = pd.DataFrame(df_data[df_data.columns[0]][0][df_data['RV_mask'][0]] )
+thresholds = [1,10,20,30,40,50,60,70,80,90,99]
+blocksize = valid.get_bstrap_size(RV.RVfullts, plot=False)
+metric = 'AUC-ROC'
+df_list = [] ; scores = []; 
+
+for r in thresholds:
+    kwrgs_events = {'event_percentile': r,
+                    'min_dur' : 1,
+                    'max_break' : 0,
+                    'grouped' : False}
+    
+    y_pred = pd.DataFrame(df_data['0_101_PEPspatcov'][0])
+    y_pred = y_pred[df_data['RV_mask'].loc[0].values]
+    RV = classes.RV_class(RVfullts, RV_ts, kwrgs_events, 
+                          fit_model_dates=None)
+    RV.TrainIsTrue = df_data['TrainIsTrue']
+    RV.RV_mask = df_data['RV_mask']
+    y_true = RV.RV_bin.values
+    y_pred_c = func_fc.get_obs_clim(RV)
+    
+    df_ = valid.get_metrics_sklearn(RV, y_pred, y_pred_c, alpha=0.05, n_boot=0, blocksize=blocksize)[0]
+    df_list.append(df_)
+    scores.append(float(df_.loc[metric].loc[metric].values))
+
+
+
+
+df_AUC_ = pd.DataFrame(scores, index=thresholds, columns=['PEP']) 
+ax = df_AUC_.plot()
+ax.set_ylabel(metric)
+if metric == 'AUC-ROC':
+    ax.set_ylim(0.5, 1.0)
+    ax.vlines(100-13.6, 0.53, 1, alpha=0.5, linewidth=0.75)
+    ax.text(100-13.6, 0.5, '+1std', 
+        horizontalalignment='center', alpha=0.7)
+elif metric == 'EDI':
+        ax.set_ylim(-1., 1.0)
+ax.set_xlabel('Event Percentile\n(1 if value > p else 0)')
+
+
+plt.savefig(os.path.join(path_fig, f'diff_event_threshold_{metric}.png'),
+            bbox_inches='tight')
 
 
 #%% get autocorrlation plots
@@ -749,167 +806,3 @@ plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/',
                          'autocorr', fname + f'_fullyear_{tsname}.png'), dpi=600)
 
 
-#%% autocorr subset
-
-dates_to_sel = func_CPPA.get_oneyr(pd.to_datetime(E_ts.time.values), 1988, 2012, 2011, 1983)
-dates_to_sel = dates_to_sel[np.logical_or(dates_to_sel.month==6, dates_to_sel.month==7, dates_to_sel.month==8)]
-now = datetime.datetime.now()
-fname = now.strftime('%Y-%m-%d_%Hhr')
-fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
-fig.text(0.5, 0.98, f'autocorrelation', fontsize=15,
-               fontweight='heavy', transform=fig.transFigure,
-               horizontalalignment='center',verticalalignment='top')
-for i, ax in enumerate(axes):
-    if i == 0:
-        ac_w  = ROC_score.autocorrelation(W_ts.sel(time=dates_to_sel))[:101]
-        ac_e  = ROC_score.autocorrelation(E_ts.sel(time=dates_to_sel))[:101]
-        ac_US = ROC_score.autocorrelation(CONUS.sel(time=dates_to_sel))[:101]
-        x = range(0, 101) ; xlabel = 'days'
-    elif i == 1:
-        n = 3000
-        ac_w  = ROC_score.autocorrelation(W_ts.sel(time=dates_to_sel))[:n]
-        ac_e  = ROC_score.autocorrelation(E_ts.sel(time=dates_to_sel))[:n]
-        ac_US = ROC_score.autocorrelation(CONUS.sel(time=dates_to_sel))[:n]
-        x = np.arange(0, ac_e.size)/92 ;  xlabel = 'years'
-    plot_ac_w_e(ax, x, ac_w, ac_e, ac_US, xlabel=xlabel)
-plt.savefig(os.path.join('/Users/semvijverberg/surfdrive/McKinRepl/', 
-                         'autocorr', fname + '_subsetyears.png'), dpi=600)
-
-#%%
-
-#now = datetime.datetime.now()
-#from load_data import load_1d
-#east_ts = "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4.npy"
-#E_ts = load_1d(os.path.join(ex['RV1d_ts_path'], east_ts), ex)[0]
-#W_ts = Prec_reg.mean(dim=('latitude', 'longitude'), skipna=True)
-#
-#def plot_ac_w_e(ax, x, ac_w, ac_e, xlabel=None):
-#    ax.plot(x, ac_w, label='W-U.S. cluster temperature')
-##    ax.plot(x, ac_e, label='E-U.S. cluster temperature')
-#    ax.tick_params(labelsize=15)
-#    ax.set_xticks(np.linspace(0,round(np.max(x)), 11, dtype=int))
-#    ax.grid(which='both', axis='both') 
-#    if xlabel == None:
-#        ax.set_xlabel(xlabel, fontsize=15)
-#    ax.legend(fontsize=12)
-#
-#fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
-#ac_w = ROC_score.autocorrelation(W_ts)
-#ac_e = ROC_score.autocorrelation(E_ts)
-#fig.text(0.5, 0.98, f'autocorrelation', fontsize=15,
-#               fontweight='heavy', transform=fig.transFigure,
-#               horizontalalignment='center',verticalalignment='top')
-#for i, ax in enumerate(axes):
-#    if i == 0:
-#        ac_w = ROC_score.autocorrelation(W_ts)[:101]
-#        ac_e = ROC_score.autocorrelation(E_ts)[:101]
-#        x = range(0, 101) ; xlabel = 'days'
-#    elif i == 1:
-#        n = W_ts.size
-#        ac_w = ROC_score.autocorrelation(W_ts)[:n]
-#        ac_e = ROC_score.autocorrelation(E_ts)[:n]
-#        x = np.arange(0, n)/365 ;  xlabel = 'years'
-#    plot_ac_w_e(ax, x, ac_w, ac_e, xlabel=xlabel)
-    
-    
-    
-        
-
-# # End of code
-
-# In[ ]:
-
-
-# %run func_CPPA.py
-# rel(func_CPPA)
-
-
-
-# if (ex['method'] == 'no_train_test_split') : n_splits = 1
-# if ex['method'][:5] == 'split' : n_splits = 1
-# if ex['method'][:6] == 'random' : n_splits = int(ex['n_yrs'] / int(ex['method'][6:]))
-# if ex['method'] == 'iter': n_splits = ex['n_yrs'] 
-
-
-# if ex['ROC_leave_n_out'] == True or ex['method'] == 'no_train_test_split': 
-#     print('leave_n_out set to False')
-#     ex['leave_n_out'] = False
-# else:
-#     ex['tested_yrs'] = []
-
-
-# rmwhere, window = ex['rollingmean']
-# if rmwhere == 'all' and window != 1:
-#     Prec_reg = rolling_mean_time(Prec_reg, ex, center=False)
-
-# train_test_list  = []
-# l_ds_CPPA        = []  
-# n = 0
-# train_all_test_n_out = (ex['ROC_leave_n_out'] == True) & (n==0) 
-# ex['n'] = n
-# # do single run    
-# # =============================================================================
-# # Create train test set according to settings 
-# # =============================================================================
-# train, test, ex = train_test_wrapper(RV_ts, Prec_reg, ex)  
-
-# Prec_train = Prec_reg.isel(time=train['Prec_train_idx'])
-# # Prec_train = Prec_train.astype('float64')
-# lats = Prec_train.latitude
-# lons = Prec_train.longitude
-
-# array = np.zeros( (len(ex['lags']), len(lats), len(lons)) )
-# pattern_CPPA = xr.DataArray(data=array, coords=[ex['lags'], lats, lons], 
-#                       dims=['lag','latitude','longitude'], name='communities_composite',
-#                       attrs={'units':'Kelvin'})
-
-
-# array = np.zeros( (len(ex['lags']), len(lats), len(lons)) )
-# pat_num_CPPA = xr.DataArray(data=array, coords=[ex['lags'], lats, lons], 
-#                       dims=['lag','latitude','longitude'], name='commun_numb_init', 
-#                       attrs={'units':'Precursor regions'})
-
-# array = np.empty( (len(ex['lags']), len(lats), len(lons)) )
-# std_train_min_lag = xr.DataArray(data=array, coords=[ex['lags'], lats, lons], 
-#                       dims=['lag','latitude','longitude'], name='std_train_min_lag', 
-#                       attrs={'units':'std [-]'})
-
-# pat_num_CPPA.name = 'commun_numbered'
-
-# weights     = pattern_CPPA.copy()
-# weights.name = 'weights'
-
-
-# RV_event_train = Ev_timeseries(train['RV'], ex['event_thres'], ex)[0]
-# RV_event_train = pd.to_datetime(RV_event_train.time.values)
-
-# RV_dates_train = pd.to_datetime(train['RV'].time.values)
-# all_yrs_set = list(set(RV_dates_train.year.values))
-# comp_years = list(RV_event_train.year.values)
-# mask_chunks = get_chunks(all_yrs_set, comp_years, ex)
-# lag = 0
-
-# idx = ex['lags'].index(lag)
-
-# events_min_lag = func_dates_min_lag(RV_event_train, lag)[1]
-# dates_train_min_lag = func_dates_min_lag(RV_dates_train, lag)[1]
-# event_idx = [list(dates_train_min_lag.values).index(E) for E in events_min_lag.values]
-# binary_events = np.zeros(RV_dates_train.size)    
-# binary_events[event_idx] = 1
-
-
-
-
-
-# std_train_min_lag[idx] = Prec_train.where(Prec_train.mask==False).sel(time=dates_train_min_lag).std(dim='time', skipna=True)
-# #%%
-# # extract precursor regions composite approach
-# # composite_p1, xrnpmap_p1, wghts_at_lag = extract_regs_p1(Prec_train, mask_chunks, events_min_lag, 
-# #                                      dates_train_min_lag, std_train_lag, ex)  
-#%%
-for yr in range(2000, 2010):
-    dates = func_CPPA.get_oneyr(ex['dates_RV'], yr) ; 
-    plt.figure() ; plt.plot(RV_ts_era5_Bram.sel(time=dates), label='bram') ; 
-    dates = func_CPPA.get_oneyr(RV_ts_era5_Sem.time.values, yr) ; 
-    plt.plot(((RV_ts_era5_Sem-RV_ts_era5_Sem.mean())/RV_ts_era5_Sem.std()).sel(time=dates), label='Sem') ; 
-    plt.legend()

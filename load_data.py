@@ -10,9 +10,10 @@ import xarray as xr
 import pandas as pd
 import numpy as np
 import func_CPPA
-import functions_RGCPD as rgcpd
 import functions_pp
+import core_pp
 import func_fc
+import class_RV
 from dateutil.relativedelta import relativedelta as date_dt
 flatten = lambda l: [item for sublist in l for item in sublist]
 
@@ -41,16 +42,20 @@ def load_response_variable(ex):
     RVhour   = RVfullts.time[0].dt.hour.values
     dates_all = pd.to_datetime(RVfullts.time.values)
     
+    start_end_TVdate = (ex['startperiod'], ex['endperiod'])
+    datesRV = functions_pp.make_TVdatestr(dates_all, 
+                                          start_end_TVdate, lpyr=lpyr)
     
-    datesRV = func_CPPA.make_datestr(dates_all, ex, 
-                            ex['startyear'], ex['endyear'], lpyr=lpyr)
+    
+    RVfullts, dates_all = functions_pp.timeseries_tofit_bins(RVfullts, 
+                                                             to_freq=1)
  
 
     if ex['rollingmean'][0] == 'RV' and ex['rollingmean'][1] != 1:
         RVfullts = func_CPPA.rolling_mean_time(RVfullts, ex, center=True)
     
     if 'exclude_yrs' in ex.keys():
-        print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
+#        print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
         
         all_yrs = np.unique(dates_all.year)
         yrs_keep = [y for y in all_yrs if y not in ex['exclude_yrs']]
@@ -74,7 +79,7 @@ def load_response_variable(ex):
     ex['endyear'] = int(datesRV[-1].year)
     
     # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
-    RV_ts = RVfullts.sel(time=datesRV)
+    RV_ts = RVfullts.sel(time=pd.to_datetime(datesRV))
     ex['n_oneyr'] = func_CPPA.get_oneyr(datesRV).size
     
 
@@ -89,8 +94,11 @@ def load_response_variable(ex):
     ex['n_yrs'] = int(len(set(RV_ts.time.dt.year.values)))
     ex['endyear'] = int(datesRV[-1].year)
     
-    
-    RV = RV_class(RVfullts, RV_ts, kwrgs_events=ex['kwrgs_events'])
+    df_RVfullts = pd.DataFrame(RVfullts.values, columns=['RVfullts'],
+                               index = dates_all)
+    df_RV_ts = pd.DataFrame(RV_ts.values, columns=['RV_ts'],
+                            index = datesRV)
+    RV = class_RV.RV_class(df_RVfullts, df_RV_ts, kwrgs_events=ex['kwrgs_events'])
 
     #%%
     return RV, ex
@@ -107,28 +115,25 @@ def load_precursor(ex):
 #            datesRV = func_CPPA.make_datestr(dates_all, ex, 
 #                            ex['startyear'], ex['endyear'], lpyr=False)
 #            dates_prec = subset_dates(datesRV, ex)
-#            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
+##            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
 #        except:
 #            datesRV = func_CPPA.make_datestr(dates_all, ex, 
 #                                    ex['startyear'], ex['endyear'], lpyr=True)
 #            dates_prec = subset_dates(datesRV, ex)
 #            varfullgl = func_CPPA.import_ds_lazy(prec_filename, ex, seldates=dates_prec)
 #    else:
-    varfullgl = functions_pp.import_ds_timemeanbins(prec_filename, ex, 
-                                             loadleap=True, to_xarr=False)
+    Prec_reg = functions_pp.import_ds_timemeanbins(prec_filename, ex['tfreq'],
+                                             loadleap=True, to_xarr=False, 
+                                             seldates=ex['dates_all'])
+    Prec_reg = core_pp.convert_longitude(Prec_reg, 'only_east')
+    if ex['add_lsm']:
+        kwrgs_2d = {'selbox' : ex['selbox'], 'format_lon':'only_east'}
+        lsm_filename = os.path.join(ex['path_mask'], ex['mask_file'])
+        lsm = core_pp.import_ds_lazy(lsm_filename, **kwrgs_2d)   
+        
+        Prec_reg['lsm'] = (('latitude', 'longitude'), (lsm < 0.3).values)
+        Prec_reg = Prec_reg.where(Prec_reg['lsm'])
 
-    
-    # =============================================================================
-    # Ensure same longitude  
-    # =============================================================================
-    if varfullgl.longitude.min() < -175 and varfullgl.longitude.max() > 175:
-        varfullgl = functions_pp.convert_longitude(varfullgl, 'only_east')
-
-    # =============================================================================
-    # Select a focus region  
-    # =============================================================================
-    Prec_reg = func_CPPA.find_region(varfullgl, region=ex['region'])[0]
-    Prec_reg = Prec_reg.sel(time=dates_all)
     
     
     
@@ -188,7 +193,7 @@ def subset_dates(datesRV, ex):
     newend   = (oneyr[-1] + pd.Timedelta(31, 'd') )
     newoneyr = pd.DatetimeIndex(start=newstart, end=newend,
                                 freq=datesRV[1] - datesRV[0])
-    newoneyr = func_CPPA.remove_leapdays(newoneyr)
+    newoneyr = core_pp.remove_leapdays(newoneyr)
     return make_dates(datesRV, newoneyr, breakyr=None)
 
 def make_dates(datetime, start_yr, breakyr=None):
@@ -245,3 +250,31 @@ def load_1d(filename, ex, name='RVfullts95'):
         lpyr = True
         RVfullts = csv_to_xarray(ex, filename, delim_whitespace=False, header=None)
     return RVfullts, lpyr
+
+def read_T95(T95name, ex):
+    filepath = os.path.join(ex['RV1d_ts_path'], T95name)
+    if filepath[-3:] == 'txt':
+        data = pd.read_csv(filepath)
+        datelist = []
+        values = []
+        for r in data.values:
+            year = int(r[0][:4])
+            month = int(r[0][5:7])
+            day = int(r[0][7:11])
+            string = '{}-{}-{}'.format(year, month, day)
+            values.append(float(r[0][10:]))
+            datelist.append( pd.Timestamp(string) )
+    elif filepath[-3:] == 'csv':
+        data = pd.read_csv(filepath, sep='\t')
+        datelist = []
+        values = []
+        for r in data.iterrows():
+            year = int(r[1]['Year'])
+            month = int(r[1]['Month'])
+            day =   int(r[1]['Day'])
+            string = '{}-{}-{}T00:00:00'.format(year, month, day)
+            values.append(float(r[1]['T95(degC)']))
+            datelist.append( pd.Timestamp(string) )
+    dates = pd.to_datetime(datelist)
+    RVts = xr.DataArray(values, coords=[dates], dims=['time'])
+    return RVts, dates

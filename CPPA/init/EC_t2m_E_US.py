@@ -52,13 +52,14 @@ def __init__():
          'sstartdate'   :       '01-01', # precursor period
          'senddate'     :       '09-30', # precursor period
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
-         'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-         'RVts_filename':       "EC_tas_2000-2159_averAggljacc1.125d_tf1_n4__to_tas_tf1_selclus2.npy", 
+         'RV1d_ts_path' :       "/Users/semvijverberg/surfdrive/output_RGCPD/easternUS_EC/958dd_ran_strat10_s30",
+         # 'RVts_filename':       "EC_tas_2000-2159_averAggljacc1.125d_tf1_n4__to_tas_tf1_selclus2.npy", 
+         'RVts_filename':       "tf1_n_clusters5_q95_dendo_958dd.nc", 
          'RV_name'      :       'tas',
          'name'         :       'tos',
          'add_lsm'      :       False,
          'region'       :       'Northern',
-         'lags'         :       np.array([0, 10, 20, 35, 50, 65]), # [0, 10, 20, 30], 
+         'lags'         :       np.array([0, 10, 20, 50]), # [0, 10, 20, 30], 
          'plot_ts'      :       True,
          'exclude_yrs'  :       [],
          'verbosity'    :       1,         
@@ -71,7 +72,7 @@ def __init__():
                                       'max_break' : 0,
                                       'min_dur'   : 1,
                                       'grouped'   : False }
-    ex['RV_aggregation']        =       'RVfullts95'
+    ex['RV_aggregation']        =       'q90tail'
     # =============================================================================
     # Settins for precursor / CPPA
     # =============================================================================
@@ -87,7 +88,7 @@ def __init__():
     # =============================================================================   
     ex['distance_eps'] = 500 # proportional to km apart from a core sample, standard = 1000 km
     ex['min_area_in_degrees2'] = 5 # minimal size to become precursor region (core sample)
-    ex['group_split'] = 'together' # choose 'together' or 'seperate'    
+    ex['group_split'] = 'together' # choose 'together' or 'seperate'  
         
         
     ex['rollingmean']           =       ('RV', 1)
@@ -98,9 +99,8 @@ def __init__():
     ex['store_timeseries']      =       False
     # =============================================================================
     # Settings for validation     
-    # =============================================================================
-    ex['method'] = 'ran_strat10' ; ex['seed'] = 30 
-    
+    # =============================================================================   
+    ex['method'] = 'ran_strat10' ; ex['seed'] = 30
     # settings for output
     ex['folder_sub_1'] = f"{ex['method']}_s{ex['seed']}"
     ex['params'] = ''
@@ -110,16 +110,6 @@ def __init__():
         ex['RV_name'] += '_' +ex['RVts_filename'].split('_')[-1][:-4] 
     ex['folder_sub_0'] = '{}_{}_{}_{}'.format(ex['datafolder'], ex['RV_name'],ex['name'],
                           ex['region'])
-    ex['path_fig'] = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
-                                  ex['folder_sub_1'], 'figures')
-    ex['path_data_out']    = os.path.join(ex['figpathbase'], ex['folder_sub_0'], 
-                                  ex['folder_sub_1'], 'data')
-    if os.path.isdir(ex['path_fig']) == False: os.makedirs(ex['path_fig'])
-    ex['fig_path'] = ex['path_fig']
-
-#    ex['exp_folder'] = sub_output  + '/figures/' 
-
-    if os.path.isdir(ex['path_data_out']) == False: os.makedirs(ex['path_data_out'])
     return ex
 
 

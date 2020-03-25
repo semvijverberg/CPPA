@@ -24,10 +24,10 @@ else:
 os.chdir(os.path.join(basepath, 'Scripts/CPPA/CPPA'))
 script_dir = os.getcwd()
 RGCPD_dir  = '/Users/semvijverberg/surfdrive/Scripts/RGCPD/RGCPD'
+fc_dir     = '/Users/semvijverberg/surfdrive/Scripts/RGCPD/forecasting'
 if script_dir not in sys.path: sys.path.append(script_dir)
 if RGCPD_dir not in sys.path: sys.path.append(RGCPD_dir)
-if sys.version[:1] == '3':
-    from importlib import reload as rel
+if fc_dir not in sys.path: sys.path.append(fc_dir)
 
 import cartopy.crs as ccrs
 import numpy as np
@@ -48,9 +48,9 @@ xrplot = func_CPPA.xarray_plot
 
 
 
-import init.era5_t2mmax_E_US_sst as settings
+#import init.era5_t2mmax_E_US_sst as settings
 #import init.ERAint_t2mmax_E_US_sst as settings
-#import init.EC_t2m_E_US as settings
+import init.EC_t2m_E_US as settings
 
 # experiments
 #import init.EC_t2m_E_US_grouped_hot_days as settings
@@ -95,8 +95,7 @@ def printset(print_ex=print_ex, ex=ex):
 
 
 printset()
-n = 0
-ex['n'] = n ; lag=0
+
  
 
 
@@ -112,24 +111,49 @@ df_splits = functions_pp.rand_traintest_years(RV, method=ex['method'],
                                                   seed=ex['seed'], 
                                                   kwrgs_events=ex['kwrgs_events'])
 #%%
-kwrgs_CPPA = {'perc_yrs_out':[5, 7.5, 10, 12.5, 15],
-              'days_before':[0, 7, 14],
-              'FCP_thres':0.8,
-              'SCM_percentile_thres':95}
+kwrgs_CPPA = {'perc_yrs_out':ex['perc_yrs_out'],
+              'days_before':ex['days_before'],
+              'FCP_thres':ex['FCP_thres'],
+              'SCM_percentile_thres':ex['SCM_percentile_thres']}
 lags_i=np.array([0,10,20,50])
 
 CPPA_prec = func_CPPA.get_robust_precursors(precur_arr, RV, df_splits, 
                                             lags_i=lags_i,
                                             kwrgs_CPPA=kwrgs_CPPA)
 #%%
+CPPA_prec['mask'] = ~CPPA_prec['weights'].astype(bool)
 actor = func_CPPA.act('sst', CPPA_prec, precur_arr)
-kwrgs_cluster = {'distance_eps' : 500,
-                 'min_area_in_degrees2' : 5} # minimal size to become precursor region (core sample)
-actor = find_precursors.cluster_DBSCAN_regions(actor, **kwrgs_cluster)
-CPPA_prec['prec_labels'] = actor.prec_labels
-CPPA_prec['lsm'] = ~np.isnan(precur_arr)[0]
+actor.distance_eps = 300
+actor.min_area_in_degrees2 = 6
+actor.group_split = 'together'
+actor = find_precursors.cluster_DBSCAN_regions(actor)
+actor.original_precur_labels = actor.prec_labels.copy()
 if np.isnan(actor.prec_labels.values).all() == False:
     plot_maps.plot_labels(actor.prec_labels.copy())
+    plt.show()
+# splitting label that combines Pacific and Atlantic
+kwrgs_mask_latlon = {'upper_right': (274, 10), 'lonmax': 283}
+prec_labels, new_label = find_precursors.split_region_by_lonlat(actor.prec_labels.copy(), 
+                                     label=8,
+                                     trialplot=False,
+                                     plot_s=4,
+                                     kwrgs_mask_latlon=kwrgs_mask_latlon)
+#kwrgs_mask_latlon = {'upper_right': (274, 11)}
+#prec_labels, new_label = find_precursors.split_region_by_lonlat(prec_labels, 
+#                                     label=8,
+#                                     trialplot=False,
+#                                     plot_s=4,
+#                                     kwrgs_mask_latlon=kwrgs_mask_latlon)
+#prec_labels = find_precursors.manual_relabel(prec_labels, 
+#                                             replace_label=new_label)
+# auto replace by size
+#prec_labels = find_precursors.manual_relabel(prec_labels) 
+actor.prec_labels = prec_labels
+                                             
+CPPA_prec['prec_labels'] = actor.prec_labels
+CPPA_prec['lsm'] = ~np.isnan(precur_arr)[0]
+
+    
 actor.ts_corr = find_precursors.spatial_mean_regions(actor)    
 # get PEP
 PEP_xr = func_CPPA.get_PEP(precur_arr, RV, df_splits, lags_i)
@@ -184,7 +208,7 @@ def add_RV(df_data_lag, RV):
 lags_store = lags_i[:2]
 for l, lag in enumerate(lags_i):
     
-    
+    print(f'lag {l}')
     df_data_ts = ts_lag(actor, lag)
     df_data_ts = df_data_ts.merge(df_splits, left_index=True, right_index=True)
     df_data_lag = add_spactov(dict_ds, lag, df_data_ts, actor)
@@ -223,13 +247,18 @@ contour_mask = (CPPA_prec['prec_labels'] > 0).sel(lag=lags_to_plot).astype(bool)
 plot_maps.plot_corr_maps(CPPA_prec.sel(lag=lags_to_plot), 
                          contour_mask, 
                          map_proj, **kwrgs_corr)
+
 lags_str = str(lags_to_plot).replace(' ','').replace('[', '').replace(']','').replace(',','_')
 fig_filename = 'CPPA_{}_vs_{}_{}'.format(ex['RV_name'], 'sst', lags_str) + f_format
-
-
 plt.savefig(os.path.join(ex['path_fig'], fig_filename),
             bbox_inches='tight')    
 
+kwrgs_corr['clim'] = (.8, 1.0)
+kwrgs_corr['clevels'] = np.arange(.8, 1+1E-9, .025)
+kwrgs_corr['cmap'] = plt.cm.Reds
+plot_maps.plot_corr_maps(CPPA_prec.sel(lag=lags_to_plot)['weights'], 
+                         contour_mask, 
+                         map_proj, **kwrgs_corr)
 
 
 #%%
@@ -347,6 +376,116 @@ elif f_format == '.png':
             bbox_inches='tight') 
 
 
+#%% plot precursor regions
+f_format = '.png'
+dpi = 200
+lags_to_plot = [0, 20, 50]
+prec_labels = CPPA_prec['prec_labels'].sel(lag=lags_to_plot).copy()
+prec_labels = prec_labels.drop('time')
+# colors of cmap are dived over min to max in n_steps. 
+# We need to make sure that the maximum value in all dimensions will be 
+# used for each plot (otherwise it assign inconsistent colors)
+max_N_regs = min(20, int(prec_labels.max() + 0.5))
+label_weak = np.nan_to_num(prec_labels.values) >=  max_N_regs
+contour_mask = None
+prec_labels.values[label_weak] = max_N_regs
+steps = max_N_regs+1
+cmap = plt.cm.tab20
+prec_labels.values = prec_labels.values-0.5
+clevels = np.linspace(0, max_N_regs,steps)
+
+kwrgs_corr = {'row_dim':'split', 'col_dim':'lag', 'hspace':-0.6, 
+              'size':2.5, 'cbar_vert':-0.0, 'clevels':clevels,
+              'subtitles' : None, 'lat_labels':True, 
+              'cticks_center':True,
+              'cmap':cmap}        
+
+
+
+plot_maps.plot_corr_maps(prec_labels, 
+                 contour_mask, 
+                 map_proj, **kwrgs_corr)
+
+lags_str = str(lags_to_plot).replace(' ','').replace('[', '').replace(']','').replace(',','_')
+fig_filename = 'labels_{}_vs_{}_{}'.format(ex['RV_name'], 'sst', lags_str) + f_format
+
+if f_format == '.pdf':
+    plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+elif f_format == '.png':
+    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight', dpi=dpi)    
+plt.show()
+
+
+#%%
+lags_to_plot = [10]
+prec_labels = CPPA_prec['prec_labels'].sel(lag=lags_to_plot).copy()
+prec_labels = prec_labels.drop('time')
+# mean labels
+xr_labels = prec_labels
+squeeze_labels = xr_labels.sel(split=0)
+labels = np.zeros_like(squeeze_labels)
+for s in xr_labels.split:
+    onesplit = xr_labels.sel(split=s)
+    nonanmask = ~np.isnan(onesplit).values
+    labels[nonanmask] = onesplit.values[nonanmask]
+squeeze_labels.values = labels
+squeeze_labels = squeeze_labels.where(labels!=0)
+
+
+robust_labels = (prec_labels > 0).astype(int).sum(dim='split')
+wgts_splits = robust_labels / prec_labels.split.size
+mask = (wgts_splits > 0.5).astype('bool')
+prec_labels = squeeze_labels.where(mask)         
+
+   
+plot_maps.plot_labels(prec_labels.drop('split'), cbar_vert=0.2)
+
+
+lags_str = str(lags_to_plot).replace(' ','').replace('[', '').replace(']','').replace(',','_')
+fig_filename = 'mean_labels_{}_vs_{}_{}'.format(ex['RV_name'], 'sst', lags_str) + f_format
+
+if f_format == '.pdf':
+    plt.savefig(os.path.join(pdfs_folder, fig_filename),
+            bbox_inches='tight')
+elif f_format == '.png':
+    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
+            bbox_inches='tight', dpi=dpi)  
+plt.show()
+
+#%% plot frequency
+import validation as valid
+import valid_plots as dfplots
+#valid.plot_freq_per_yr(RV)
+
+plt.figure(figsize=(15,7))
+plt.ylabel('frequency (1/year)')
+RV.freq_per_year.plot(kind='bar')
+fname = 'freq_per_year.png'
+filename = os.path.join(ex['path_fig'], fname)
+plt.savefig(filename) 
+
+#%% get timeseries:
+
+#ERA5_filename = 'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19.npy'
+GHCND_filename = "PEP-T95TimeSeries.txt"
+
+
+RV, ex = load_data.load_response_variable(ex)
+T95_ERA5 = RV.RV_ts
+ex['RV1d_ts_path'] =  '/Users/semvijverberg/surfdrive/MckinRepl/RVts'
+T95_GHCND, GHCND_dates = load_data.read_T95(GHCND_filename, ex)
+dates = functions_pp.get_oneyr(RV.dates_RV, 2012)
+shared_dates = functions_pp.get_oneyr(RV.dates_RV, *list(range(1982, 2016)))
+#%%
+data = np.stack([T95_GHCND.sel(time=shared_dates).values, T95_ERA5.loc[shared_dates].values.squeeze()], axis=1)
+df = pd.DataFrame(data, columns=['GHCND', 'ERA-5'], index=shared_dates)
+
+dfplots.plot_oneyr_events(df, 'std', 2012)
+plt.savefig(os.path.join(ex['path_fig'], 'timeseries_ERA5_GHCND.png'),
+            bbox_inches='tight')
+
 #%% Weighing features if there are extracted every run (training set)
 # weighted by persistence of pattern over
 
@@ -380,83 +519,6 @@ if final_pattern.sum().values != 0.:
         plt.savefig(os.path.join(ex['path_fig'], fig_filename),
             bbox_inches='tight') 
 
-#%% plot precursor regions
-f_format = '.png'
-dpi = 200
-lags_to_plot = [0, 20, 50]
-prec_labels = CPPA_prec['prec_labels'].sel(lag=lags_to_plot)
-prec_labels = prec_labels.drop('time')
-# colors of cmap are dived over min to max in n_steps. 
-# We need to make sure that the maximum value in all dimensions will be 
-# used for each plot (otherwise it assign inconsistent colors)
-max_N_regs = min(20, int(prec_labels.max() + 0.5))
-label_weak = np.nan_to_num(prec_labels.values) >=  max_N_regs
-contour_mask = None
-prec_labels.values[label_weak] = max_N_regs
-steps = max_N_regs+1
-cmap = plt.cm.tab20
-prec_labels.values = prec_labels.values-0.5
-clevels = np.linspace(0, max_N_regs,steps)
-
-kwrgs_corr = {'row_dim':'split', 'col_dim':'lag', 'hspace':-0.35, 
-              'size':3, 'cbar_vert':-0.025, 'clevels':clevels,
-              'subtitles' : None, 'lat_labels':True, 
-              'cticks_center':True,
-              'cmap':cmap}        
-
-
-
-plot_maps.plot_corr_maps(prec_labels, 
-                 contour_mask, 
-                 map_proj, **kwrgs_corr)
-
-lags_str = str(lags_to_plot).replace(' ','').replace('[', '').replace(']','').replace(',','_')
-fig_filename = 'labels_{}_vs_{}_{}'.format(ex['RV_name'], 'sst', lags_str) + f_format
-
-if f_format == '.pdf':
-    plt.savefig(os.path.join(pdfs_folder, fig_filename),
-            bbox_inches='tight')
-elif f_format == '.png':
-    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
-            bbox_inches='tight', dpi=dpi)    
-
-
-#%%
-lags_to_plot = [0]
-prec_labels = CPPA_prec['prec_labels'].sel(lag=lags_to_plot).copy()
-prec_labels = prec_labels.drop('time')
-# mean labels
-xr_labels = prec_labels
-squeeze_labels = xr_labels.sel(split=0)
-labels = np.zeros_like(squeeze_labels)
-for s in xr_labels.split:
-    onesplit = xr_labels.sel(split=s)
-    nonanmask = ~np.isnan(onesplit).values
-    labels[nonanmask] = onesplit.values[nonanmask]
-squeeze_labels.values = labels
-squeeze_labels = squeeze_labels.where(labels!=0)
-
-
-robust_labels = (prec_labels > 0).astype(int).sum(dim='split')
-wgts_splits = robust_labels / prec_labels.split.size
-mask = (wgts_splits > 0.5).astype('bool')
-prec_labels = squeeze_labels.where(mask)         
-
-   
-plot_maps.plot_labels(prec_labels.drop('split'), cbar_vert=0.2)
-
-
-lags_str = str(lags_to_plot).replace(' ','').replace('[', '').replace(']','').replace(',','_')
-fig_filename = 'mean_labels_{}_vs_{}_{}'.format(ex['RV_name'], 'sst', lags_str) + f_format
-
-if f_format == '.pdf':
-    plt.savefig(os.path.join(pdfs_folder, fig_filename),
-            bbox_inches='tight')
-elif f_format == '.png':
-    plt.savefig(os.path.join(ex['path_fig'], fig_filename),
-            bbox_inches='tight', dpi=dpi)  
-
-    
 #%% plot ENSO / PDO maps
 path_fig = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/ran_strat10_s30/figures'
 path_data = '/Users/semvijverberg/surfdrive/RGCPD_mcKinnon/t2mmax_E-US_sm123_m01-09_dt10/18jun-17aug_lag0-0_ran_strat10_s30/pcA_none_ac0.05_at0.05_subinfo/fulldata_pcA_none_ac0.05_at0.05_2019-09-24.h5'
@@ -526,34 +588,9 @@ elif f_format == '.png':
     plt.savefig(os.path.join(ex['path_fig'], fig_filename),
             bbox_inches='tight', dpi=dpi)  
 
-#filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-#dicRV = np.load(filename,  encoding='latin1').item()
-#folder = os.path.join(ex['figpathbase'], ex['exp_folder'])
-#if 'mask' in ex.keys():
-#    xarray_plot(ex['mask'], path=folder, name='RV_mask', saving=True)
-#    
-#func_CPPA.plot_oneyr_events(RV_ts, ex, 2012, ex['output_dic_folder'], saving=True)
-## plotting same figure as in paper
-#for i in range(2005, 2010):
-#    func_CPPA.plot_oneyr_events(RV_ts, ex, i, folder, saving=True)
 
-##%% Plotting prediciton time series vs truth:
-#
-##yrs_to_plot = [1983, 1988, 1994, 2002, 2007, 2012, 2015]
-#ex['n_events'] = []
-#all_years = np.unique(SCORE.y_true_test.index.year)
-#for y in all_years:
-#    n_ev = int(SCORE.y_true_test[0][SCORE.y_true_test[0].index.year==y].sum())
-#    ex['n_events'].append(n_ev)
-#if 'n_events' in ex.keys():
-#    sorted_idx = np.argsort(ex['n_events'])
-#    sorted_n_events = ex['n_events'].copy(); sorted_n_events.sort()
-#    yrs_to_plot = [all_years[n] for n in sorted_idx[:6]]
-#    [yrs_to_plot.append(all_years[n]) for n in sorted_idx[-5:]]
-#
-##    test = ex['train_test_list'][0][1]        
-#plotting_timeseries(SCORE, 'spatcov', yrs_to_plot, ex) 
-#plotting_timeseries(SCORE, 'logit', yrs_to_plot, ex) 
+
+
 
 #%%    
 from sklearn.metrics import brier_score_loss
@@ -567,33 +604,7 @@ for p in np.linspace(0, 1, 19):
     rand_scores.append(brier_score_loss(rand_true, np.repeat(p, n_steps)))
 plt.plot(np.linspace(0, 1, 19), rand_scores)
 
-#%% plot frequency
-import validation as valid
-import valid_plots as dfplots
-valid.plot_freq_per_yr(RV)
 
-fname = 'freq_per_year.png'
-filename = os.path.join(ex['fig_path'], fname)
-plt.savefig(filename) 
-
-#%% get timeseries:
-
-ERA5_filename = 'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19.npy'
-GHCND_filename = "PEP-T95TimeSeries.txt"
-
-
-RV, ex = load_data.load_response_variable(ex)
-T95_ERA5 = RV.RV_ts
-T95_GHCND, GHCND_dates = load_data.read_T95(GHCND_filename, ex)
-dates = functions_pp.get_oneyr(RV.dates_RV, 2012)
-shared_dates = functions_pp.get_oneyr(RV.dates_RV, *list(range(1982, 2016)))
-#%%
-data = np.stack([T95_GHCND.sel(time=shared_dates).values, T95_ERA5.loc[shared_dates].values.squeeze()], axis=1)
-df = pd.DataFrame(data, columns=['GHCND', 'ERA-5'], index=shared_dates)
-
-dfplots.plot_oneyr_events(df, 'std', 2012)
-plt.savefig(os.path.join(ex['path_fig'], 'timeseries_ERA5_GHCND.png'),
-            bbox_inches='tight')
 #%% Keep forecast the same, change event definition
 import func_fc
 import validation as valid

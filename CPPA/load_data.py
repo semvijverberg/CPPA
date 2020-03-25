@@ -12,8 +12,8 @@ import numpy as np
 import func_CPPA
 import functions_pp
 import core_pp
-import func_fc
 import class_RV
+import RGCPD
 from dateutil.relativedelta import relativedelta as date_dt
 flatten = lambda l: [item for sublist in l for item in sublist]
 
@@ -34,70 +34,68 @@ def load_response_variable(ex):
                ex['RV_aggregation']))
     
     filename = os.path.join(ex['RV1d_ts_path'], ex['RVts_filename'])
-    ex['hash'] = filename.split('_')[-1].split('.')[0]
-    RVfullts, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
-    if ex['tfreq'] != 1:
-        RVfullts, dates = functions_pp.time_mean_bins(RVfullts, ex, ex['tfreq'])
     
-    RVhour   = RVfullts.time[0].dt.hour.values
-    dates_all = pd.to_datetime(RVfullts.time.values)
+    rg = RGCPD.RGCPD(list_of_name_path=[(1, filename)], tfreq=1)
+                                        
+    rg.pp_TV(name_ds=ex['RV_aggregation'])
     
-    start_end_TVdate = (ex['startperiod'], ex['endperiod'])
-    datesRV = core_pp.get_subdates(dates_all, 
-                                          start_end_TVdate, lpyr=lpyr)
+    ex['hash'] = rg.hash
+    
+#     RVfullts, lpyr = load_1d(filename, ex, ex['RV_aggregation'])
+#     if ex['tfreq'] != 1:
+#         RVfullts, dates = functions_pp.time_mean_bins(RVfullts, ex, ex['tfreq'])
+    
+#     RVhour   = RVfullts.time[0].dt.hour.values
+#     dates_all = pd.to_datetime(RVfullts.time.values)
+    
+#     start_end_TVdate = (ex['startperiod'], ex['endperiod'])
+#     datesRV = core_pp.get_subdates(dates_all, 
+#                                           start_end_TVdate, lpyr=lpyr)
     
     
-    RVfullts, dates_all = functions_pp.timeseries_tofit_bins(RVfullts, 
-                                                             to_freq=1)
+#     RVfullts, dates_all = functions_pp.timeseries_tofit_bins(RVfullts, 
+#                                                              to_freq=1)
  
 
-    if ex['rollingmean'][0] == 'RV' and ex['rollingmean'][1] != 1:
-        RVfullts = func_CPPA.rolling_mean_time(RVfullts, ex, center=True)
+#     if ex['rollingmean'][0] == 'RV' and ex['rollingmean'][1] != 1:
+#         RVfullts = func_CPPA.rolling_mean_time(RVfullts, ex, center=True)
     
-    if 'exclude_yrs' in ex.keys():
-#        print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
+#     if 'exclude_yrs' in ex.keys():
+# #        print('excluding yr(s): {} from analysis'.format(ex['exclude_yrs']))
         
-        all_yrs = np.unique(dates_all.year)
-        yrs_keep = [y for y in all_yrs if y not in ex['exclude_yrs']]
-        idx_yrs =  [i for i in np.arange(dates_all.year.size) if dates_all.year[i] in yrs_keep]
-#        dates_all = dates_all[idx_yrs]
-        mask_all    = np.zeros(dates_all.size, dtype=bool)
-        mask_all[idx_yrs] = True
+#         all_yrs = np.unique(dates_all.year)
+#         yrs_keep = [y for y in all_yrs if y not in ex['exclude_yrs']]
+#         idx_yrs =  [i for i in np.arange(dates_all.year.size) if dates_all.year[i] in yrs_keep]
+#         mask_all    = np.zeros(dates_all.size, dtype=bool)
+#         mask_all[idx_yrs] = True
         
-        idx_yrs =  [i for i in np.arange(datesRV.year.size) if datesRV.year[i] in yrs_keep]
-        mask_RV    = np.zeros(datesRV.size, dtype=bool)
-        mask_RV[idx_yrs] = True
+#         idx_yrs =  [i for i in np.arange(datesRV.year.size) if datesRV.year[i] in yrs_keep]
+#         mask_RV    = np.zeros(datesRV.size, dtype=bool)
+#         mask_RV[idx_yrs] = True
         
         
-        dates_all = dates_all[mask_all]
-        datesRV = datesRV[mask_RV]
+#         dates_all = dates_all[mask_all]
+#         datesRV = datesRV[mask_RV]
     
-    ex['dates_all']  = pd.to_datetime(np.array(dates_all, dtype='datetime64[D]'))
-    ex['dates_RV'] = pd.to_datetime(np.array(datesRV, dtype='datetime64[D]'))
-    # add RVhour to daily dates
-    datesRV = datesRV + pd.Timedelta(int(RVhour), unit='h')
-    ex['endyear'] = int(datesRV[-1].year)
+    ex['dates_all']  = rg.dates_all
+    ex['dates_RV'] = rg.dates_TV
+
+    ex['endyear'] = rg.start_end_year[-1]
     
     # Selected Time series of T95 ex['sstartdate'] until ex['senddate']
-    RV_ts = RVfullts.sel(time=pd.to_datetime(datesRV))
-    ex['n_oneyr'] = func_CPPA.get_oneyr(datesRV).size
+    RV_ts = rg.fullts.sel(time=rg.dates_TV)
+    ex['n_oneyr'] = func_CPPA.get_oneyr(ex['dates_RV']).size
     
 
-    #expanded_time = func_mcK.expand_times_for_lags(dates, ex)
-    
-    if ex['RVts_filename'][:8] == 'nino3.4_' and 'event_thres' in ex.keys():
-        ex['event_thres'] = ex['event_thres']
-    else:
-        event_percentile = ex['kwrgs_events']['event_percentile']
-        ex['event_thres'] = func_fc.Ev_threshold(RV_ts, event_percentile)
+    event_percentile = ex['kwrgs_events']['event_percentile']
+    ex['event_thres'] = class_RV.Ev_threshold(RV_ts, event_percentile)
 
     ex['n_yrs'] = int(len(set(RV_ts.time.dt.year.values)))
-    ex['endyear'] = int(datesRV[-1].year)
     
-    df_RVfullts = pd.DataFrame(RVfullts.values, columns=['RVfullts'],
-                               index = dates_all)
+    df_RVfullts = pd.DataFrame(rg.fullts.values, columns=['RVfullts'],
+                               index = ex['dates_all'])
     df_RV_ts = pd.DataFrame(RV_ts.values, columns=['RV_ts'],
-                            index = datesRV)
+                            index = ex['dates_RV'])
     RV = class_RV.RV_class(df_RVfullts, df_RV_ts, kwrgs_events=ex['kwrgs_events'])
     
     if ex['hash'] not in ex['folder_sub_1']:
@@ -164,30 +162,30 @@ def load_precursor(ex):
     #%%
     return Prec_reg, ex
 
-class RV_class:
-    def __init__(self, RVfullts, RV_ts, kwrgs_events=None):
-        self.RV_ts = RV_ts
-        self.RVfullts = RVfullts
-        if type(RVfullts) == type(xr.DataArray([0])):
-            self.dfRV_ts = RV_ts.drop('quantile').to_dataframe(name='RVfullts')
-            self.dfRVfullts = RVfullts.drop('quantile').to_dataframe(name='RVfullts')
-        self.dates_all = pd.to_datetime(self.dfRVfullts.index)
-        self.dates_RV = pd.to_datetime(self.dfRV_ts.index)
-        self.n_oneRVyr = self.dates_RV[self.dates_RV.year == self.dates_RV.year[0]].size
-        if kwrgs_events is not None:
-            self.threshold = func_fc.Ev_threshold(self.dfRV_ts, 
-                                              kwrgs_events['event_percentile'])
-#            self.RV_b_full = func_fc.Ev_timeseries(self.RVfullts, 
+#class RV_class:
+#    def __init__(self, RVfullts, RV_ts, kwrgs_events=None):
+#        self.RV_ts = RV_ts
+#        self.RVfullts = RVfullts
+#        if type(RVfullts) == type(xr.DataArray([0])):
+#            self.dfRV_ts = RV_ts.drop('quantile').to_dataframe(name='RVfullts')
+#            self.dfRVfullts = RVfullts.drop('quantile').to_dataframe(name='RVfullts')
+#        self.dates_all = pd.to_datetime(self.dfRVfullts.index)
+#        self.dates_RV = pd.to_datetime(self.dfRV_ts.index)
+#        self.n_oneRVyr = self.dates_RV[self.dates_RV.year == self.dates_RV.year[0]].size
+#        if kwrgs_events is not None:
+#            self.threshold = class_RV.Ev_threshold(self.dfRV_ts, 
+#                                              kwrgs_events['event_percentile'])
+##            self.RV_b_full = class_RV.Ev_timeseries(self.RVfullts, 
+##                               threshold=self.threshold , 
+##                               min_dur=kwrgs_events['min_dur'],
+##                               max_break=kwrgs_events['max_break'], 
+##                               grouped=kwrgs_events['grouped'])[0]
+#            self.RV_bin   = class_RV.Ev_timeseries(self.dfRV_ts, 
 #                               threshold=self.threshold , 
 #                               min_dur=kwrgs_events['min_dur'],
 #                               max_break=kwrgs_events['max_break'], 
 #                               grouped=kwrgs_events['grouped'])[0]
-            self.RV_bin   = func_fc.Ev_timeseries(self.dfRV_ts, 
-                               threshold=self.threshold , 
-                               min_dur=kwrgs_events['min_dur'],
-                               max_break=kwrgs_events['max_break'], 
-                               grouped=kwrgs_events['grouped'])[0]
-            self.freq      = func_fc.get_freq_years(self)
+#            self.freq      = func_fc.get_freq_years(self)
         
         
 

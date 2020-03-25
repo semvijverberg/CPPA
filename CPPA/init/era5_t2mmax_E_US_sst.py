@@ -24,6 +24,8 @@ datafolder = 'ERA5'
 path_pp  = os.path.join(data_base_path, datafolder +'/input_raw/preprocessed') # path to netcdfs
 if os.path.isdir(path_pp) == False: os.makedirs(path_pp)
 
+# orig paper1 v1, 20-03-2020
+# 'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19_Xzkup1.npy'
 
 # "comp_v_spclus4of4_tempclus2_AgglomerativeClustering_smooth15days_clus1_daily.npy"
 # "era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4.npy"
@@ -44,13 +46,13 @@ def __init__():
          'sstartdate'   :       '01-01', # precursor period
          'senddate'     :       '12-31', # precursor period
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
-         'RV1d_ts_path' :       os.path.join(basepath, 'MckinRepl/RVts'),
-         'RVts_filename':       'era5_t2mmax_US_1979-2018_averAggljacc0.25d_tf1_n4__to_t2mmax_US_tf1_selclus4_okt19_Xzkup1.npy', 
-         'RV_name'      :       't2mmax',
+         'RV1d_ts_path' :       "/Users/semvijverberg/surfdrive/output_RGCPD/easternUS/",
+         'RVts_filename':       "tf1_n_clusters4_q90_dendo_ff393.nc", 
+         'RV_name'      :       'mx2t',
          'name'         :       'sst',
          'add_lsm'      :       False,
          'region'       :       'Northern',
-         'lags'         :       np.array([0, 10, 20, 35, 50, 65]), #[0, 10, 20, 35, 50, 65]
+         'lags'         :       np.array([0, 10, 20, 50]), #[0, 10, 20, 35, 50, 65]
          'plot_ts'      :       True,
          'exclude_yrs'  :       [],
          'verbosity'    :       1,
@@ -64,7 +66,7 @@ def __init__():
                                       'min_dur'   : 1,
                                       'grouped'   : False }
 
-    ex['RV_aggregation']        =       'RVfullts95'
+    ex['RV_aggregation']        =       'q90tail'
     # =============================================================================
     # Settins for precursor / CPPA
     # =============================================================================
@@ -79,9 +81,9 @@ def __init__():
     ex['rollingmean']           =       ('RV', 1)
     ex['extra_wght_dur']        =       False
     ex['SCM_percentile_thres']  =       95
-    ex['FCP_thres']             =       0.80
+    ex['FCP_thres']             =       0.85
     ex['wghts_accross_lags']    =       False
-    ex['perc_yrs_out']          =       [5,7.5,10,12.5,15] #[5, 10, 12.5, 15, 20] 
+    ex['perc_yrs_out']          =       [5,10,15,20,25] #[5, 10, 12.5, 15, 20] 
     ex['days_before']           =       [0, 7, 14]
     ex['store_timeseries']      =       False
 
@@ -102,7 +104,7 @@ def __init__():
     # (4) split{int}    :   split dataset into single train and test set
     # (5) no_train_test_split
     
-    ex['method'] = 'ran_strat10' ; ex['seed'] = 5 
+    ex['method'] = 'ran_strat10' ; ex['seed'] = 30
     # settings for output
     ex['folder_sub_1'] = f"{ex['method']}_s{ex['seed']}"
     ex['params'] = ''

@@ -62,7 +62,7 @@ import init.EC_t2m_E_US as settings
 #import init.bram_e5mask_EC_t2m_E_US_sst as settings
 
 ex = settings.__init__()
-#ex['RV_aggregation'] = 'RVfullts_mean'
+ex['kwrgs_events']['window'] = 'mean'
 
 # =============================================================================
 # load data (write your own function load_data(ex) )
@@ -262,17 +262,17 @@ plot_maps.plot_corr_maps(CPPA_prec.sel(lag=lags_to_plot)['weights'],
 
 
 #%%
-filename = '/Users/semvijverberg/surfdrive/MckinRepl/era5_T2mmax_sst_Northern/ran_strat10_s30/data/era5_19-09-19_12hr_output.nc'
-#filename = '/Users/semvijverberg/surfdrive/MckinRepl/EC_tas_tos_Northern/ran_strat10_s30/data/EC_16-09-19_19hr_output.nc'
+#filename = '/Users/semvijverberg/surfdrive/output_RGCPD/easternUS/ERA5_mx2t_sst_Northern/ff393_ran_strat10_s30/data/ERA5_20-03-20_16hr_output.nc'
+filename = '/Users/semvijverberg/Desktop/cluster/surfdrive/output_RGCPD/easternUS_EC/EC_tas_tos_Northern/958dd_ran_strat10_s30/data/EC_21-03-20_16hr_output.nc'
 ds = xr.open_dataset(filename)    
     
 CPPA_prec = ds['sst']
-# LSM mask
-CPPA_prec['lsm'] = ~np.isnan(precur_arr)[0]
-actor = func_CPPA.act('sst', CPPA_prec, precur_arr)
-actor.prec_labels = CPPA_prec['prec_labels']
-lags_i = CPPA_prec.lag.values[:2]
-actor.ts_corr = find_precursors.spatial_mean_regions(actor)  
+## LSM mask
+#CPPA_prec['lsm'] = ~np.isnan(precur_arr)[0]
+#actor = func_CPPA.act('sst', CPPA_prec, precur_arr)
+#actor.prec_labels = CPPA_prec['prec_labels']
+#lags_i = CPPA_prec.lag.values[:2]
+#actor.ts_corr = find_precursors.spatial_mean_regions(actor)  
 #LSM = np.isnan(CPPA_prec)
 #mask = (('latitude', 'longitude', LSM.values))
 #CPPA_prec['lsm'] = LSM
@@ -280,6 +280,8 @@ actor.ts_corr = find_precursors.spatial_mean_regions(actor)
 # =============================================================================
 #   Plotting mean composite maps
 # =============================================================================
+pdfs_folder = os.path.join(ex['path_fig'], 'pdfs')
+if os.path.isdir(pdfs_folder) != True : os.makedirs(pdfs_folder)
 central_lon_plots = 200
 map_proj = ccrs.LambertCylindrical(central_longitude=central_lon_plots)
 f_format = '.pdf'
@@ -301,10 +303,14 @@ subtitles.append(['{} days'.format(l) for l in lags_plot  ])
 subtitles = np.array(subtitles).T
 mean_n_patterns.name = 'sst_mean_{}_traintest'.format(n_splits)
 
-
-kwrgs_corr = {'row_dim':'lag', 'col_dim':'split', 'hspace':-0.3, 
-              'size':3, 'cbar_vert':-0.025, 'clim':(-0.4,0.4),
-              'subtitles' : subtitles, 'lat_labels':False}
+# ERA5
+kwrgs_corr = {'row_dim':'lag', 'col_dim':'split', 'hspace':-0.75, 
+              'size':3, 'cbar_vert':0.005, 'clim':(-0.4,0.4),
+              'subtitles' : subtitles, 'lat_labels':True}
+# EC
+#kwrgs_corr = {'row_dim':'lag', 'col_dim':'split', 'hspace':-0.6, 
+#              'size':3, 'cbar_vert':-0.01, 'clim':(-0.4,0.4),
+#              'subtitles' : subtitles, 'lat_labels':False}
 
 # mcKinnon PEP box
 west_lon = -215; east_lon = -130; south_lat = 20; north_lat = 50
@@ -313,6 +319,7 @@ kwrgs_corr['drawbox'] = ['all', (west_lon, east_lon, south_lat, north_lat)]
 plot_maps.plot_corr_maps(mean_n_patterns, mean_mask, map_proj, **kwrgs_corr)
 fig_filename = os.path.join('', 'mean_over_{}_tests_lags{}'.format(n_splits,
                         str(lags_plot).replace(' ' ,'')) ) + f_format
+
 
 if f_format == '.pdf':
     plt.savefig(os.path.join(pdfs_folder, fig_filename),
@@ -361,10 +368,10 @@ kwrgs = dict( {'title' : pers_patt.attrs['title'], 'clevels' : 'notdefault',
                'size' : 3,
                'vmin' : max(0,vmax-20), 'vmax' : vmax, 'clim' : (max(0,vmax-20), vmax),
                'cmap' : cm, 'column' : 1, 'extend':extend,
-               'cbar_vert' : 0.04, 'cbar_hght' : -0.01,
+               'cbar_vert' : 0.07, 'cbar_hght' : -0.01,
                'adj_fig_h' : 1, 'adj_fig_w' : 1., 
-               'hspace' : -0.1, 'wspace' : 0.04, 
-               'title_h': 0.95} )
+               'hspace' : -0.2, 'wspace' : 0.04, 
+               'title_h': 0.93} )
 #plot_maps.plot_corr_maps(pers_patt, map_proj=map_proj, **kwrgs)    
 func_CPPA.plotting_wrapper(pers_patt, ex, fig_filename, kwrgs=kwrgs, map_proj=map_proj)
 

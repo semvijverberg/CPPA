@@ -52,7 +52,7 @@ def __init__():
          'sstartdate'   :       '01-01', # precursor period
          'senddate'     :       '09-30', # precursor period
          'figpathbase'  :       os.path.join(basepath, 'McKinRepl/'),
-         'RV1d_ts_path' :       "/Users/semvijverberg/surfdrive/output_RGCPD/easternUS_EC/958dd_ran_strat10_s30",
+         'RV1d_ts_path' :       "/Users/semvijverberg/Desktop/cluster/surfdrive/output_RGCPD/easternUS_EC/EC_tas_tos_Northern/",
          # 'RVts_filename':       "EC_tas_2000-2159_averAggljacc1.125d_tf1_n4__to_tas_tf1_selclus2.npy", 
          'RVts_filename':       "tf1_n_clusters5_q95_dendo_958dd.nc", 
          'RV_name'      :       'tas',
